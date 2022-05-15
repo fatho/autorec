@@ -1,0 +1,26 @@
+{
+    "nixpkgs": {
+        "branch": "nixpkgs-unstable",
+        "description": "Nix Packages collection",
+        "homepage": "https://github.com/NixOS/nixpkgs",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "118ec238bfb788a34f1d53c4d95931fadfa70367",
+        "sha256": "162856bdh8akj6yadhbcq0pl4h2qrd3cahs4zayniqcyvcz9d11j",
+        "type": "tarball",
+        "url": "https://github.com/NixOS/nixpkgs/archive/118ec238bfb788a34f1d53c4d95931fadfa70367.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
+    "nixpkgs-mozilla": {
+        "branch": "master",
+        "description": "Mozilla overlay for Nixpkgs.",
+        "homepage": "",
+        "owner": "mozilla",
+        "repo": "nixpkgs-mozilla",
+        "rev": "e1f7540fc0a8b989fb8cf701dc4fd7fc76bcf168",
+        "sha256": "1b6p0rly0rywq60ks84ghc0n5zrqiafc2r64nlbnlkh9whmh5fmj",
+        "type": "tarball",
+        "url": "https://github.com/mozilla/nixpkgs-mozilla/archive/e1f7540fc0a8b989fb8cf701dc4fd7fc76bcf168.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    }
+}
