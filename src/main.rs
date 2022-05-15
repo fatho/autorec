@@ -10,7 +10,6 @@ use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::task::JoinError;
-use tokio_util::task::LocalPoolHandle;
 use tracing::{debug, error, info};
 
 mod midi;
@@ -23,18 +22,27 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
 
-    // Local thread pool for udev because those types are !Send
-    let pool = LocalPoolHandle::new(1);
-
     // Set up midi context
     let mut midi = midi::MidiDeviceListener::new()?;
-    let midi_thread = tokio::spawn(async move {
-        loop {
-            let ev = midi.listen().await;
-            info!("Announcement: {ev:?}");
+    let (device_event_sender, mut device_event_receiver) = tokio::sync::mpsc::channel(16);
+    let midi_poll_thread = tokio::task::spawn_blocking(move || {
+        info!("Started device polling");
+        while !device_event_sender.is_closed() {
+            let event = midi.wait_event(5000)?;
+
+            if let Some(event) = event {
+                let _ = device_event_sender.blocking_send(event);
+            }
         }
+        Ok(())
     });
-    // info!("MIDI ports: {:#?}", midi.ports());
+    let midi_device_thread = tokio::spawn(async move {
+        info!("Started device handling");
+        while let Some(event) = device_event_receiver.recv().await {
+            debug!("Got device event: {event:?}");
+        }
+        Ok(())
+    });
 
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
@@ -58,8 +66,9 @@ async fn main() -> Result<()> {
             info!("Terminated");
             Ok(())
         },
-        thread_result = web_thread => handle_thread_exit("Web", thread_result),
-        thread_result = midi_thread => handle_thread_exit("Midi", thread_result),
+        thread_result = web_thread => handle_thread_exit("web", thread_result),
+        thread_result = midi_poll_thread => handle_thread_exit("midi-poll", thread_result),
+        thread_result = midi_device_thread => handle_thread_exit("midi-device", thread_result),
     }
 }
 

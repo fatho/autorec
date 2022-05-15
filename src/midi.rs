@@ -3,15 +3,14 @@
 use std::{ffi::CStr, os::unix::prelude::RawFd};
 
 use alsa::seq::{Addr, PortCap, PortSubscribe, PortType};
-use tokio::io::unix::AsyncFd;
-
-use crate::midi::helpers::alsa_ports;
+use tokio::io::{unix::AsyncFd, Interest};
+use tracing::debug;
 
 pub struct MidiDeviceListener {
     seq: alsa::Seq,
     client: i32,
     announce_port: i32,
-    async_fds: Vec<AsyncFd<RawFd>>,
+    fds: Vec<alsa::poll::pollfd>,
     event_buffer: Vec<DeviceEvent>,
 }
 
@@ -59,14 +58,9 @@ impl MidiDeviceListener {
 
         let fds = alsa::poll::Descriptors::get(&(&seq, Some(alsa::Direction::Capture)))
             .map_err(helpers::alsa_io_err)?;
-        let async_fds = fds
-            .iter()
-            .map(|poll_fd| AsyncFd::new(poll_fd.fd as RawFd))
-            .collect::<Result<Vec<_>, _>>()?;
+        tracing::debug!("Sequencer FDs {fds:?}");
 
-        tracing::info!("{fds:?}");
-
-        let event_buffer = alsa_ports(&seq)
+        let event_buffer = helpers::alsa_ports(&seq)
             .into_iter()
             .map(DeviceEvent::Connected)
             .collect();
@@ -75,54 +69,57 @@ impl MidiDeviceListener {
             seq,
             client,
             announce_port,
-            async_fds,
+            fds,
             event_buffer,
         })
     }
 
-    pub async fn listen(&mut self) -> std::io::Result<DeviceEvent> {
-        'outer: loop {
-            if let Some(event) = self.event_buffer.pop() {
-                return Ok(event);
-            }
+    pub fn wait_event(&mut self, timeout_ms: i32) -> std::io::Result<Option<DeviceEvent>> {
+        if let Some(event) = self.event_buffer.pop() {
+            debug!("Returning buffered event");
+            return Ok(Some(event));
+        }
 
-            let mut guards = vec![];
-            for fd in self.async_fds.iter() {
-                let guard = fd.readable().await;
-                guards.push(guard)
-            }
+        debug!("Waiting for read readiness");
+        let ret = alsa::poll::poll(&mut self.fds, timeout_ms).map_err(helpers::alsa_io_err)?;
 
-            let mut input = self.seq.input();
+        debug!("Ready with {ret:?}");
 
-            loop {
-                match input.event_input() {
-                    Ok(event) => {
-                        match event.get_type() {
-                            alsa::seq::EventType::PortExit => {
-                                if let Some(addr) = event.get_data::<Addr>() {
-                                    let port = helpers::port_from_addr(&self.seq, addr)
-                                        .map_err(helpers::alsa_io_err)?;
-                                    self.event_buffer.push(DeviceEvent::Disconnected(port));
-                                }
-                            }
-                            alsa::seq::EventType::PortStart => {
-                                if let Some(addr) = event.get_data::<Addr>() {
-                                    let port = helpers::port_from_addr(&self.seq, addr)
-                                        .map_err(helpers::alsa_io_err)?;
-                                    self.event_buffer.push(DeviceEvent::Connected(port));
-                                }
-                            },
-                            // Rest is uninteresting here
-                            _ => (),
+        if ret == 0 {
+            return Ok(None)
+        }
+
+        let mut input = self.seq.input();
+
+        match input.event_input() {
+            Ok(event) => {
+                debug!("Got event");
+                match event.get_type() {
+                    alsa::seq::EventType::PortExit => {
+                        if let Some(addr) = event.get_data::<Addr>() {
+                            let port = helpers::port_from_addr(&self.seq, addr)
+                                .map_err(helpers::alsa_io_err)?;
+                            return Ok(Some(DeviceEvent::Disconnected(port)));
                         }
                     }
-                    Err(err) if err.errno() == alsa::nix::errno::Errno::EWOULDBLOCK => {
-                        continue 'outer
+                    alsa::seq::EventType::PortStart => {
+                        if let Some(addr) = event.get_data::<Addr>() {
+                            let port = helpers::port_from_addr(&self.seq, addr)
+                                .map_err(helpers::alsa_io_err)?;
+                            return Ok(Some(DeviceEvent::Disconnected(port)));
+                        }
                     }
-                    Err(other) => return Err(other.errno().into()),
+                    // Rest is uninteresting here
+                    other => debug!("Got uninteresting event {other:?}"),
                 }
             }
+            Err(err) if err.errno() == alsa::nix::errno::Errno::EWOULDBLOCK => {
+                debug!("Getting event would block");
+            }
+            Err(other) => return Err(other.errno().into()),
         }
+
+        Ok(None)
     }
 }
 
