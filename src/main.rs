@@ -38,6 +38,8 @@ async fn main() -> Result<()> {
         Result::<()>::Ok(())
     });
 
+    // Wait for the first to exit: this should normally be the signal handler
+    // (unless something goes terribly wrong)
     tokio::select! {
         _ = exit_signal => {
             info!("Terminated");
