@@ -97,16 +97,14 @@ impl MidiDeviceListener {
                 match event.get_type() {
                     alsa::seq::EventType::PortExit => {
                         if let Some(addr) = event.get_data::<Addr>() {
-                            let port = helpers::port_from_addr(&self.seq, addr)
-                                .map_err(helpers::alsa_io_err)?;
+                            let port = helpers::port_from_addr(&self.seq, addr);
                             return Ok(Some(DeviceEvent::Disconnected(port)));
                         }
                     }
                     alsa::seq::EventType::PortStart => {
                         if let Some(addr) = event.get_data::<Addr>() {
-                            let port = helpers::port_from_addr(&self.seq, addr)
-                                .map_err(helpers::alsa_io_err)?;
-                            return Ok(Some(DeviceEvent::Disconnected(port)));
+                            let port = helpers::port_from_addr(&self.seq, addr);
+                            return Ok(Some(DeviceEvent::Connected(port)));
                         }
                     }
                     // Rest is uninteresting here
@@ -169,14 +167,12 @@ mod helpers {
         ports
     }
 
-    pub fn port_from_addr(seq: &alsa::seq::Seq, addr: Addr) -> Result<super::Port, alsa::Error> {
-        let port_info = seq.get_any_port_info(addr)?;
-        let client_info = seq.get_any_client_info(addr.client)?;
-        Ok(super::Port {
+    pub fn port_from_addr(seq: &alsa::seq::Seq, addr: Addr) -> super::Port {
+        super::Port {
             port_id: addr.port,
             client_id: addr.client,
-            client_name: client_info.get_name().ok().map(String::from),
-            port_name: port_info.get_name().ok().map(String::from),
-        })
+            client_name: seq.get_any_client_info(addr.client).and_then(|c| c.get_name().map(String::from)).ok(),
+            port_name: seq.get_any_port_info(addr).and_then(|p| p.get_name().map(String::from)).ok(),
+        }
     }
 }
