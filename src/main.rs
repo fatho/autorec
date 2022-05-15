@@ -10,9 +10,13 @@ use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::task::JoinError;
-use tokio_udev::{AsyncMonitorSocket, MonitorBuilder};
 use tokio_util::task::LocalPoolHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+
+mod midi;
+mod recorder;
+mod server;
+mod state;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,7 +25,16 @@ async fn main() -> Result<()> {
 
     // Local thread pool for udev because those types are !Send
     let pool = LocalPoolHandle::new(1);
-    let udev_thread = spawn_udev_monitor(pool);
+
+    // Set up midi context
+    let mut midi = midi::MidiDeviceListener::new()?;
+    let midi_thread = tokio::spawn(async move {
+        loop {
+            let ev = midi.listen().await;
+            info!("Announcement: {ev:?}");
+        }
+    });
+    // info!("MIDI ports: {:#?}", midi.ports());
 
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
@@ -45,8 +58,8 @@ async fn main() -> Result<()> {
             info!("Terminated");
             Ok(())
         },
-        thread_result = udev_thread => handle_thread_exit("Udev", thread_result),
         thread_result = web_thread => handle_thread_exit("Web", thread_result),
+        thread_result = midi_thread => handle_thread_exit("Midi", thread_result),
     }
 }
 
@@ -78,36 +91,4 @@ fn handle_thread_exit(
             Err(join_err.into())
         }
     }
-}
-
-fn spawn_udev_monitor(pool: LocalPoolHandle) -> tokio::task::JoinHandle<Result<()>> {
-    let udev_thread = pool.spawn_pinned(|| async move {
-        info!("Initializing udev");
-        let builder = MonitorBuilder::new()?;
-        // TODO: find out which device class the piano belongs to
-        // .match_subsystem_devtype("usb", "usb_device")?;
-
-        let monitor: AsyncMonitorSocket = builder.listen()?.try_into()?;
-
-        info!("Waiting for events");
-
-        monitor
-            .for_each(|event| {
-                match event {
-                    Ok(event) => {
-                        info!(
-                            "Hotplug event: {}: {}",
-                            event.event_type(),
-                            event.device().syspath().display()
-                        );
-                    }
-                    Err(err) => error!("Failed to get udev event {}", err),
-                }
-                ready(())
-            })
-            .await;
-
-        Result::<()>::Ok(())
-    });
-    udev_thread
 }

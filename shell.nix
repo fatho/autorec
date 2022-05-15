@@ -23,6 +23,7 @@ in
 
     buildInputs = with nixpkgs; [
       pkg-config
+      alsa-lib
       systemd
     ];
 
