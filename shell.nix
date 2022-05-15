@@ -13,13 +13,19 @@ in
       channel.rust
       # Neat helper tools
       cargo-audit
+      cargo-crev
       cargo-edit
       cargo-flamegraph
 
       # Nix tools
       niv
     ];
-    
+
+    buildInputs = with nixpkgs; [
+      pkg-config
+      systemd
+    ];
+
     # Always enable rust backtraces in development shell
     RUST_BACKTRACE = "1";
 
