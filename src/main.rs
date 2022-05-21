@@ -1,10 +1,9 @@
 use axum::{
-    http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
-    Json, Router,
+    Router, Extension,
 };
 use color_eyre::Result;
+use state::AppState;
 use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
@@ -19,13 +18,27 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
 
+    // Initialize state
+    let proto_state_ref = AppState::new_shared();
+
     // Set up midi context
     let mut midi = midi::MidiDeviceListener::new()?;
+    let state_ref = proto_state_ref.clone();
     let midi_device_thread = tokio::spawn(async move {
         info!("Started device handling");
         loop {
             let event = midi.next().await?;
             debug!("Got device event: {event:?}");
+            let mut state = state_ref.lock().await;
+            // TODO: spawn recorder thread here
+            match event {
+                midi::DeviceEvent::Connected { device, info } => {
+                    state.devices.insert(device, info);
+                }
+                midi::DeviceEvent::Disconnected { device } => {
+                    state.devices.remove(&device);
+                }
+            }
         }
     });
 
@@ -33,8 +46,12 @@ async fn main() -> Result<()> {
     let exit_signal = tokio::signal::ctrl_c();
 
     // Spawn a web server for remote interaction
+    let state_ref = proto_state_ref.clone();
     let web_thread = tokio::spawn(async move {
-        let app = Router::new().route("/status", get(status));
+        let app = Router::new()
+            .route("/devices", get(server::devices))
+            .route("/debug", get(server::debug))
+            .layer(Extension(state_ref));
 
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
         tracing::info!("Web server listening on http://{}", addr);
@@ -48,17 +65,12 @@ async fn main() -> Result<()> {
     // (unless something goes terribly wrong)
     tokio::select! {
         _ = exit_signal => {
-            info!("Terminated");
+            info!("Shutting down...");
             Ok(())
         },
         thread_result = web_thread => handle_thread_exit("web", thread_result),
         thread_result = midi_device_thread => handle_thread_exit("midi-device", thread_result),
     }
-}
-
-// basic handler that responds with a static string
-async fn status() -> &'static str {
-    "Hello, World!"
 }
 
 fn handle_thread_exit(

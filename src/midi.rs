@@ -22,6 +22,12 @@ pub struct Device {
     port_id: i32,
 }
 
+impl Device {
+    pub fn id(&self) -> String {
+        format!("{}:{}", self.client_id, self.port_id)
+    }
+}
+
 #[derive(Debug)]
 pub struct DeviceInfo {
     pub client_name: String,
