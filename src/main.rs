@@ -8,6 +8,8 @@ use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
 
+use crate::midi::MidiRecorder;
+
 mod midi;
 mod recorder;
 mod server;
@@ -17,6 +19,8 @@ mod state;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
+
+    error!(on = alsa::seq::EventType::Noteon as i32, off = alsa::seq::EventType::Noteoff as i32, "wtf");
 
     // Initialize state
     let proto_state_ref = AppState::new_shared();
@@ -30,10 +34,27 @@ async fn main() -> Result<()> {
             let event = midi.next().await?;
             debug!("Got device event: {event:?}");
             let mut state = state_ref.lock().await;
-            // TODO: spawn recorder thread here
+
             match event {
                 midi::DeviceEvent::Connected { device, info } => {
-                    state.devices.insert(device, info);
+                    // TODO: configurable filter
+                    if info.client_name.contains("Midi Through") {
+                        match MidiRecorder::new(device.clone()) {
+                            Ok(mut rec) => {
+                                tokio::spawn(async move {
+                                    loop {
+                                        let evt = rec.next().await?;
+                                        debug!("recorded event: {:?}", evt);
+                                    }
+                                    std::io::Result::Ok(())
+                                });
+                            },
+                            Err(err) => {
+                                error!("Failed to set up recorder for {}: {}", device.id(), err);
+                            },
+                        }
+                        state.devices.insert(device, info);
+                    }
                 }
                 midi::DeviceEvent::Disconnected { device } => {
                     state.devices.remove(&device);

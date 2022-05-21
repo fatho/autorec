@@ -1,0 +1,14 @@
+Goals:
+    ✔ Monitor MIDI devices @done(22-05-21 13:41)
+    Automatic recording:
+        ✔ Start recorder when device is attached @started(22-05-21 13:41) @done(22-05-21 15:31) @lasted(1h50m16s)
+        ☐ Keep track of ongoing recordings
+        ☐ Make client matching configurable
+        ☐ Stop recorder when device is detached
+        ☐ Write recorded events to MIDI file
+    Web UI:
+        ☐ View current state
+        ☐ Live-update of view (maybe a SPA with websocket updates)
+    Playback:
+        ☐ Implement ALSA playback
+        ☐ Play previously recorded MIDI files via Web-UI

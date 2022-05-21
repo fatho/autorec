@@ -20,3 +20,8 @@ impl AppState {
         Arc::new(Mutex::new(AppState::new()))
     }
 }
+
+
+pub struct Recorder {
+    pub device: Device,
+}
