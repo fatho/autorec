@@ -16,18 +16,22 @@ pub struct MidiDeviceListener {
     event_buffer: VecDeque<DeviceEvent>,
 }
 
-#[derive(Debug)]
-pub struct Port {
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Device {
     client_id: i32,
     port_id: i32,
-    client_name: Option<String>,
-    port_name: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DeviceInfo {
+    pub client_name: String,
+    pub port_name: String,
 }
 
 #[derive(Debug)]
 pub enum DeviceEvent {
-    Connected(Port),
-    Disconnected(Port),
+    Connected { device: Device, info: DeviceInfo },
+    Disconnected { device: Device },
 }
 
 impl MidiDeviceListener {
@@ -70,9 +74,9 @@ impl MidiDeviceListener {
         let poll_fd = AsyncFd::new(fds[0].fd)?;
 
         // Pre-generate "events" for devices that are already connected
-        let event_buffer = helpers::alsa_ports(&seq)
+        let event_buffer = helpers::get_readable_midi_ports(&seq)
             .into_iter()
-            .map(DeviceEvent::Connected)
+            .map(|(device, info)| DeviceEvent::Connected { device, info })
             .collect();
 
         Ok(Self {
@@ -101,16 +105,21 @@ impl MidiDeviceListener {
                     Ok(event) => {
                         debug!("got event: {:?}", event.get_type());
                         match event.get_type() {
-                            alsa::seq::EventType::PortExit => {
-                                if let Some(addr) = event.get_data::<Addr>() {
-                                    let port = helpers::port_from_addr(&self.seq, addr);
-                                    self.event_buffer.push_back(DeviceEvent::Disconnected(port));
-                                }
-                            }
                             alsa::seq::EventType::PortStart => {
                                 if let Some(addr) = event.get_data::<Addr>() {
-                                    let port = helpers::port_from_addr(&self.seq, addr);
-                                    self.event_buffer.push_back(DeviceEvent::Connected(port));
+                                    let info = helpers::get_device_info(&self.seq, addr)
+                                        .map_err(helpers::alsa_io_err)?;
+                                    self.event_buffer.push_back(DeviceEvent::Connected {
+                                        device: addr.into(),
+                                        info,
+                                    });
+                                }
+                            }
+                            alsa::seq::EventType::PortExit => {
+                                if let Some(addr) = event.get_data::<Addr>() {
+                                    self.event_buffer.push_back(DeviceEvent::Disconnected {
+                                        device: addr.into(),
+                                    });
                                 }
                             }
                             // Rest is uninteresting here
@@ -129,6 +138,15 @@ impl MidiDeviceListener {
     }
 }
 
+impl From<alsa::seq::Addr> for Device {
+    fn from(a: alsa::seq::Addr) -> Self {
+        Self {
+            client_id: a.client,
+            port_id: a.port,
+        }
+    }
+}
+
 mod helpers {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};
 
@@ -136,7 +154,7 @@ mod helpers {
     pub const SND_SEQ_PORT_SYSTEM_ANNOUNCE: i32 = 1;
 
     /// Check whether the given port is suitable as a source for autorec.
-    pub fn is_port_usable(client: &ClientInfo, port: &PortInfo) -> bool {
+    pub fn is_port_readable_midi(client: &ClientInfo, port: &PortInfo) -> bool {
         // Exclude system ports (timer & announce)
         client.get_client() != SND_SEQ_CLIENT_SYSTEM
             // Must support MIDI
@@ -151,38 +169,46 @@ mod helpers {
         err.errno().into()
     }
 
-    pub fn alsa_ports(seq: &alsa::seq::Seq) -> Vec<super::Port> {
+    pub fn get_readable_midi_ports(
+        seq: &alsa::seq::Seq,
+    ) -> Vec<(super::Device, super::DeviceInfo)> {
         let mut ports = vec![];
         for client in alsa::seq::ClientIter::new(&seq) {
             let client_id = client.get_client();
-            let client_name = client.get_name().ok().map(String::from);
-
+            let client_name = client
+                .get_name()
+                .ok()
+                .map(String::from)
+                .unwrap_or_else(String::new);
             for port in alsa::seq::PortIter::new(&seq, client.get_client()) {
-                if is_port_usable(&client, &port) {
-                    ports.push(super::Port {
+                if is_port_readable_midi(&client, &port) {
+                    let dev = super::Device {
                         client_id,
-                        client_name: client_name.clone(),
                         port_id: port.get_port(),
-                        port_name: port.get_name().ok().map(String::from),
-                    })
+                    };
+                    let info = super::DeviceInfo {
+                        client_name: client_name.clone(),
+                        port_name: port
+                            .get_name()
+                            .ok()
+                            .map(String::from)
+                            .unwrap_or_else(String::new),
+                    };
+                    ports.push((dev, info));
                 }
             }
         }
         ports
     }
 
-    pub fn port_from_addr(seq: &alsa::seq::Seq, addr: Addr) -> super::Port {
-        super::Port {
-            port_id: addr.port,
-            client_id: addr.client,
+    pub fn get_device_info(seq: &alsa::seq::Seq, addr: Addr) -> alsa::Result<super::DeviceInfo> {
+        Ok(super::DeviceInfo {
             client_name: seq
                 .get_any_client_info(addr.client)
-                .and_then(|c| c.get_name().map(String::from))
-                .ok(),
+                .and_then(|c| c.get_name().map(String::from))?,
             port_name: seq
                 .get_any_port_info(addr)
-                .and_then(|p| p.get_name().map(String::from))
-                .ok(),
-        }
+                .and_then(|p| p.get_name().map(String::from))?,
+        })
     }
 }
