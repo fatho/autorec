@@ -1,17 +1,17 @@
 // NOTE: Only supports Linux (via ALSA) at the moment
 
-use std::{ffi::CStr, os::unix::prelude::RawFd};
+use std::{collections::VecDeque, ffi::CStr, os::unix::prelude::RawFd};
 
 use alsa::seq::{Addr, PortCap, PortSubscribe, PortType};
 use tokio::io::{unix::AsyncFd, Interest};
-use tracing::debug;
+use tracing::{debug,trace};
 
 pub struct MidiDeviceListener {
     seq: alsa::Seq,
     client: i32,
     announce_port: i32,
-    fds: Vec<alsa::poll::pollfd>,
-    event_buffer: Vec<DeviceEvent>,
+    fds: Box<[alsa::poll::pollfd]>,
+    event_buffer: VecDeque<DeviceEvent>,
 }
 
 #[derive(Debug)]
@@ -57,7 +57,8 @@ impl MidiDeviceListener {
             .map_err(helpers::alsa_io_err)?;
 
         let fds = alsa::poll::Descriptors::get(&(&seq, Some(alsa::Direction::Capture)))
-            .map_err(helpers::alsa_io_err)?;
+            .map_err(helpers::alsa_io_err)?
+            .into_boxed_slice();
         tracing::debug!("Sequencer FDs {fds:?}");
 
         let event_buffer = helpers::alsa_ports(&seq)
@@ -75,49 +76,63 @@ impl MidiDeviceListener {
     }
 
     pub fn wait_event(&mut self, timeout_ms: i32) -> std::io::Result<Option<DeviceEvent>> {
-        if let Some(event) = self.event_buffer.pop() {
-            debug!("Returning buffered event");
+        if let Some(event) = self.event_buffer.pop_front() {
+            trace!("Returning buffered event");
             return Ok(Some(event));
         }
 
-        debug!("Waiting for read readiness");
+        trace!("Waiting for read readiness");
+
+        // aseqdump also refreshes the pollfds every iteration
+        alsa::poll::Descriptors::fill(&(&self.seq, Some(alsa::Direction::Capture)), &mut self.fds)
+            .map_err(helpers::alsa_io_err)?;
         let ret = alsa::poll::poll(&mut self.fds, timeout_ms).map_err(helpers::alsa_io_err)?;
 
-        debug!("Ready with {ret:?}");
+        trace!("Ready with {ret:?}");
 
         if ret == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut input = self.seq.input();
 
-        match input.event_input() {
-            Ok(event) => {
-                debug!("Got event");
-                match event.get_type() {
-                    alsa::seq::EventType::PortExit => {
-                        if let Some(addr) = event.get_data::<Addr>() {
-                            let port = helpers::port_from_addr(&self.seq, addr);
-                            return Ok(Some(DeviceEvent::Disconnected(port)));
+        loop {
+            match input.event_input() {
+                Ok(event) => {
+                    debug!("Got event: {:?}", event.get_type());
+                    match event.get_type() {
+                        alsa::seq::EventType::PortExit => {
+                            if let Some(addr) = event.get_data::<Addr>() {
+                                let port = helpers::port_from_addr(&self.seq, addr);
+                                self.event_buffer.push_back(DeviceEvent::Disconnected(port));
+                            }
                         }
-                    }
-                    alsa::seq::EventType::PortStart => {
-                        if let Some(addr) = event.get_data::<Addr>() {
-                            let port = helpers::port_from_addr(&self.seq, addr);
-                            return Ok(Some(DeviceEvent::Connected(port)));
+                        alsa::seq::EventType::PortStart => {
+                            // TODO: figure out why ClientStart happens immediately, but PortStart
+                            // only when running `aseqdump -l` for listing all the ports. Are ports lazy?
+                            if let Some(addr) = event.get_data::<Addr>() {
+                                let port = helpers::port_from_addr(&self.seq, addr);
+                                self.event_buffer.push_back(DeviceEvent::Connected(port));
+                            }
                         }
+                        alsa::seq::EventType::ClientStart => {
+                            if let Some(addr) = event.get_data::<Addr>() {
+                                trace!("new client: {}", addr.client);
+                            }
+                        }
+                        // Rest is uninteresting here
+                        _ => {},
                     }
-                    // Rest is uninteresting here
-                    other => debug!("Got uninteresting event {other:?}"),
                 }
+                Err(err) if err.errno() == alsa::nix::errno::Errno::EWOULDBLOCK => {
+                    trace!("no more events for now");
+                    break;
+                }
+                Err(other) => return Err(other.errno().into()),
             }
-            Err(err) if err.errno() == alsa::nix::errno::Errno::EWOULDBLOCK => {
-                debug!("Getting event would block");
-            }
-            Err(other) => return Err(other.errno().into()),
         }
 
-        Ok(None)
+        Ok(self.event_buffer.pop_front())
     }
 }
 
@@ -171,8 +186,14 @@ mod helpers {
         super::Port {
             port_id: addr.port,
             client_id: addr.client,
-            client_name: seq.get_any_client_info(addr.client).and_then(|c| c.get_name().map(String::from)).ok(),
-            port_name: seq.get_any_port_info(addr).and_then(|p| p.get_name().map(String::from)).ok(),
+            client_name: seq
+                .get_any_client_info(addr.client)
+                .and_then(|c| c.get_name().map(String::from))
+                .ok(),
+            port_name: seq
+                .get_any_port_info(addr)
+                .and_then(|p| p.get_name().map(String::from))
+                .ok(),
         }
     }
 }
