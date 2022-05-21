@@ -3,14 +3,16 @@
 use std::{collections::VecDeque, ffi::CStr, os::unix::prelude::RawFd};
 
 use alsa::seq::{Addr, PortCap, PortSubscribe, PortType};
-use tokio::io::{unix::AsyncFd, Interest};
-use tracing::{debug,trace};
+use tokio::io::unix::AsyncFd;
+use tracing::{debug, trace};
 
 pub struct MidiDeviceListener {
     seq: alsa::Seq,
+    #[allow(unused)]
     client: i32,
+    #[allow(unused)]
     announce_port: i32,
-    fds: Box<[alsa::poll::pollfd]>,
+    poll_fd: AsyncFd<RawFd>,
     event_buffer: VecDeque<DeviceEvent>,
 }
 
@@ -30,12 +32,13 @@ pub enum DeviceEvent {
 
 impl MidiDeviceListener {
     pub fn new() -> Result<Self, std::io::Error> {
-        // TODO: change to non-blocking and figure out how to hook up with tokio
+        // Create ALSA client
         let seq = alsa::seq::Seq::open(None, None, true).map_err(helpers::alsa_io_err)?;
         let client = seq.client_id().map_err(helpers::alsa_io_err)?;
         seq.set_client_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"autorec-listener\0") })
             .map_err(helpers::alsa_io_err)?;
 
+        // Create local port for receiving announcement events
         let announce_port = seq
             .create_simple_port(
                 unsafe { CStr::from_bytes_with_nul_unchecked(b"autorec-announce\0") },
@@ -44,6 +47,7 @@ impl MidiDeviceListener {
             )
             .map_err(helpers::alsa_io_err)?;
 
+        // Subscribe client via the local port to the global announcement port
         let subscribe = PortSubscribe::empty().map_err(helpers::alsa_io_err)?;
         subscribe.set_dest(Addr {
             client,
@@ -56,11 +60,16 @@ impl MidiDeviceListener {
         seq.subscribe_port(&subscribe)
             .map_err(helpers::alsa_io_err)?;
 
+        // Set up polling via tokio
         let fds = alsa::poll::Descriptors::get(&(&seq, Some(alsa::Direction::Capture)))
-            .map_err(helpers::alsa_io_err)?
-            .into_boxed_slice();
-        tracing::debug!("Sequencer FDs {fds:?}");
+            .map_err(helpers::alsa_io_err)?;
+        tracing::debug!("Sequencer fds {fds:?}");
+        // Theoretically, there could be more FDs, but it seems that for Alsa Sequencers, the number
+        // of file descriptors for polling is hard-coded to one.
+        assert_eq!(fds.len(), 1);
+        let poll_fd = AsyncFd::new(fds[0].fd)?;
 
+        // Pre-generate "events" for devices that are already connected
         let event_buffer = helpers::alsa_ports(&seq)
             .into_iter()
             .map(DeviceEvent::Connected)
@@ -70,75 +79,55 @@ impl MidiDeviceListener {
             seq,
             client,
             announce_port,
-            fds,
+            poll_fd,
             event_buffer,
         })
     }
 
-    pub fn wait_event(&mut self, timeout_ms: i32) -> std::io::Result<Option<DeviceEvent>> {
-        if let Some(event) = self.event_buffer.pop_front() {
-            trace!("Returning buffered event");
-            return Ok(Some(event));
-        }
-
-        trace!("Waiting for read readiness");
-
-        // aseqdump also refreshes the pollfds every iteration
-        alsa::poll::Descriptors::fill(&(&self.seq, Some(alsa::Direction::Capture)), &mut self.fds)
-            .map_err(helpers::alsa_io_err)?;
-        let ret = alsa::poll::poll(&mut self.fds, timeout_ms).map_err(helpers::alsa_io_err)?;
-
-        trace!("Ready with {ret:?}");
-
-        if ret == 0 {
-            return Ok(None);
-        }
-
-        let mut input = self.seq.input();
-
+    pub async fn next(&mut self) -> std::io::Result<DeviceEvent> {
         loop {
-            match input.event_input() {
-                Ok(event) => {
-                    debug!("Got event: {:?}", event.get_type());
-                    match event.get_type() {
-                        alsa::seq::EventType::PortExit => {
-                            if let Some(addr) = event.get_data::<Addr>() {
-                                let port = helpers::port_from_addr(&self.seq, addr);
-                                self.event_buffer.push_back(DeviceEvent::Disconnected(port));
+            if let Some(event) = self.event_buffer.pop_front() {
+                trace!("returning buffered event");
+                return Ok(event);
+            }
+
+            trace!("waiting for read readiness");
+            let mut guard = self.poll_fd.readable().await?;
+
+            let mut input = self.seq.input();
+
+            loop {
+                match input.event_input() {
+                    Ok(event) => {
+                        debug!("got event: {:?}", event.get_type());
+                        match event.get_type() {
+                            alsa::seq::EventType::PortExit => {
+                                if let Some(addr) = event.get_data::<Addr>() {
+                                    let port = helpers::port_from_addr(&self.seq, addr);
+                                    self.event_buffer.push_back(DeviceEvent::Disconnected(port));
+                                }
                             }
-                        }
-                        alsa::seq::EventType::PortStart => {
-                            // TODO: figure out why ClientStart happens immediately, but PortStart
-                            // only when running `aseqdump -l` for listing all the ports. Are ports lazy?
-                            if let Some(addr) = event.get_data::<Addr>() {
-                                let port = helpers::port_from_addr(&self.seq, addr);
-                                self.event_buffer.push_back(DeviceEvent::Connected(port));
+                            alsa::seq::EventType::PortStart => {
+                                if let Some(addr) = event.get_data::<Addr>() {
+                                    let port = helpers::port_from_addr(&self.seq, addr);
+                                    self.event_buffer.push_back(DeviceEvent::Connected(port));
+                                }
                             }
+                            // Rest is uninteresting here
+                            _ => {}
                         }
-                        alsa::seq::EventType::ClientStart => {
-                            if let Some(addr) = event.get_data::<Addr>() {
-                                trace!("new client: {}", addr.client);
-                            }
-                        }
-                        // Rest is uninteresting here
-                        _ => {},
                     }
+                    Err(err) if err.errno() == alsa::nix::errno::Errno::EAGAIN => {
+                        trace!("events exhausted");
+                        guard.clear_ready();
+                        break;
+                    }
+                    Err(other) => return Err(other.errno().into()),
                 }
-                Err(err) if err.errno() == alsa::nix::errno::Errno::EWOULDBLOCK => {
-                    trace!("no more events for now");
-                    break;
-                }
-                Err(other) => return Err(other.errno().into()),
             }
         }
-
-        Ok(self.event_buffer.pop_front())
     }
 }
-
-// IDEA:
-//   - enumerate existing ports up front
-//   - send "fake" events from existing ports before resuming real events
 
 mod helpers {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};

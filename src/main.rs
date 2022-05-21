@@ -5,9 +5,6 @@ use axum::{
     Json, Router,
 };
 use color_eyre::Result;
-use futures_util::future::ready;
-use futures_util::stream::StreamExt;
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
@@ -24,30 +21,18 @@ async fn main() -> Result<()> {
 
     // Set up midi context
     let mut midi = midi::MidiDeviceListener::new()?;
-    let (device_event_sender, mut device_event_receiver) = tokio::sync::mpsc::channel(16);
-    let midi_poll_thread = tokio::task::spawn_blocking(move || {
-        info!("Started device polling");
-        while !device_event_sender.is_closed() {
-            let event = midi.wait_event(5000)?;
-
-            if let Some(event) = event {
-                let _ = device_event_sender.blocking_send(event);
-            }
-        }
-        Ok(())
-    });
     let midi_device_thread = tokio::spawn(async move {
         info!("Started device handling");
-        while let Some(event) = device_event_receiver.recv().await {
+        loop {
+            let event = midi.next().await?;
             debug!("Got device event: {event:?}");
         }
-        Ok(())
     });
 
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
 
-    // Spawn a webserver for remote interaction
+    // Spawn a web server for remote interaction
     let web_thread = tokio::spawn(async move {
         let app = Router::new().route("/status", get(status));
 
@@ -67,7 +52,6 @@ async fn main() -> Result<()> {
             Ok(())
         },
         thread_result = web_thread => handle_thread_exit("web", thread_result),
-        thread_result = midi_poll_thread => handle_thread_exit("midi-poll", thread_result),
         thread_result = midi_device_thread => handle_thread_exit("midi-device", thread_result),
     }
 }
