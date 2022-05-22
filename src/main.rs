@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
 
-use crate::midi::MidiRecorder;
+use crate::midi::RecordPayload;
 
 mod midi;
 mod recorder;
@@ -36,33 +36,37 @@ async fn main() -> Result<()> {
     let proto_state_ref = AppState::new_shared();
 
     // Set up midi context
-    let mut midi = midi::MidiDeviceListener::new()?;
+    let midi = midi::Manager::new();
+
+    let mut devices = midi.create_device_listener()?;
+
     let state_ref = proto_state_ref.clone();
     let midi_device_thread = tokio::spawn(async move {
         info!("Started device handling");
         loop {
-            let event = midi.next().await?;
+            let event = devices.next().await?;
             debug!("Got device event: {event:?}");
             let mut state = state_ref.lock().await;
 
             match event {
-                // TODO: devise more robust scheme to avoid connecting to our own clients
                 midi::DeviceEvent::Connected { device, info } => {
                     if info.client_name.contains(&args.midi_client) {
                         info!("Matching client {} connected", info.client_name);
-                        match MidiRecorder::new(device.clone()) {
+                        match midi.create_recorder(&device) {
                             Ok(mut rec) => {
                                 tokio::spawn(async move {
+                                    info!("Beginning recording");
                                     loop {
-                                        match rec.next().await {
-                                            Ok(evt) => debug!("recorded event: {:?}", evt),
-                                            Err(err) => {
-                                                error!("recording failed, stopping: {}", err);
-                                                break;
-                                            }
+                                        let evt = rec.next().await.map_err(|err| {
+                                            error!("Recording failed {}", err); err
+                                        })?;
+                                        debug!("recorded {:?}", evt);
+                                        if let RecordPayload::RecordEnd = evt.payload {
+                                            break;
                                         }
                                     }
-                                    std::io::Result::Ok(())
+                                    info!("Ended recording");
+                                    color_eyre::Result::<_>::Ok(())
                                 });
                             }
                             Err(err) => {
