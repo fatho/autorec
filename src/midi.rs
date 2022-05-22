@@ -109,4 +109,8 @@ impl Recorder {
     pub async fn next(&mut self) -> color_eyre::Result<RecordEvent> {
         self.inner.next().await
     }
+
+    pub fn tick_to_duration(&self, tick: u32) -> std::time::Duration {
+        self.inner.tick_to_duration(tick)
+    }
 }

@@ -3,8 +3,9 @@ Goals:
     Automatic recording:
         ✔ Start recorder when device is attached @started(22-05-21 13:41) @done(22-05-21 15:31) @lasted(1h50m16s)
         ☐ Keep track of ongoing recordings
-        ☐ Make client matching configurable
-        ☐ Stop recorder when device is detached
+        ✔ Make client matching configurable @done(22-05-22 13:43)
+        ✔ Stop recorder when device is detached @done(22-05-22 13:43)
+        ✔ Detect when new song starts @done(22-05-22 13:44)
         ☐ Write recorded events to MIDI file
     Web UI:
         ☐ View current state
@@ -12,3 +13,6 @@ Goals:
     Playback:
         ☐ Implement ALSA playback
         ☐ Play previously recorded MIDI files via Web-UI
+    Convenience:
+        ☐ Add proper config file format
+        ☐ Add special "chord" for immediately starting new song (e.g. pressing two lowest keys)

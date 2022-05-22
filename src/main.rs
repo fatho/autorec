@@ -9,8 +9,6 @@ use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
 
-use crate::midi::RecordPayload;
-
 mod midi;
 mod recorder;
 mod server;
@@ -53,26 +51,21 @@ async fn main() -> Result<()> {
                     if info.client_name.contains(&args.midi_client) {
                         info!("Matching client {} connected", info.client_name);
                         match midi.create_recorder(&device) {
-                            Ok(mut rec) => {
+                            Ok(rec) => {
                                 tokio::spawn(async move {
                                     info!("Beginning recording");
-                                    loop {
-                                        let evt = rec.next().await.map_err(|err| {
-                                            error!("Recording failed {}", err); err
-                                        })?;
-                                        debug!("recorded {:?}", evt);
-                                        if let RecordPayload::RecordEnd = evt.payload {
-                                            break;
-                                        }
+                                    if let Err(err) = recorder::run_recorder(rec).await {
+                                        error!("Recorder failed: {}", err)
+                                    } else {
+                                        info!("Recorder shut down");
                                     }
-                                    info!("Ended recording");
-                                    color_eyre::Result::<_>::Ok(())
                                 });
                             }
                             Err(err) => {
                                 error!("Failed to set up recorder for {}: {}", device.id(), err);
                             }
                         }
+
                         state.devices.insert(device, info);
                     } else {
                         info!("Ignoring client {}: no match", info.client_name);
@@ -96,7 +89,7 @@ async fn main() -> Result<()> {
             .route("/debug", get(server::debug))
             .layer(Extension(state_ref));
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+        let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
         tracing::info!("Web server listening on http://{}", addr);
         axum::Server::bind(&addr)
             .serve(app.into_make_service())

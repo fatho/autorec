@@ -57,7 +57,7 @@ impl MidiRegistry {
     }
 
     fn is_known_client(&self, client: i32) -> bool {
-        let mut data = self.data.lock().expect("mutex poisoned");
+        let data = self.data.lock().expect("mutex poisoned");
         data.clients.contains(&client)
     }
 }
@@ -244,6 +244,8 @@ impl DeviceListener {
 pub struct MidiRecorder {
     poll: Option<EventsPoll<RecordEvent>>,
     last_tick: u32,
+    bpm: u32,
+    ppq: i32,
 }
 
 impl MidiRecorder {
@@ -257,8 +259,9 @@ impl MidiRecorder {
 
         // These should be the defaults, but better to spell it out
         let tempo = QueueTempo::empty()?;
-        tempo.set_ppq(96); // Pulses per Quarter note
         let bpm = 120;
+        let ppq = 96;
+        tempo.set_ppq(ppq); // Pulses per Quarter note
         tempo.set_tempo(1000000 * 60 / bpm); // Microseconds per beat
         client.seq.set_queue_tempo(recv_queue, &tempo)?;
 
@@ -312,7 +315,15 @@ impl MidiRecorder {
         Ok(Self {
             poll: Some(poll),
             last_tick: 0,
+            bpm,
+            ppq,
         })
+    }
+
+    pub fn tick_to_duration(&self, tick: u32) -> std::time::Duration {
+        std::time::Duration::from_micros(
+            (tick as u64) * 1000000 * 60 / (self.bpm as u64 * self.ppq as u64)
+        )
     }
 
     pub async fn next(&mut self) -> color_eyre::Result<RecordEvent> {
@@ -386,7 +397,7 @@ impl MidiRecorder {
 mod internal {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};
 
-    use crate::midi::{Device, DeviceInfo};
+    use crate::midi::{DeviceInfo};
 
     pub const SND_SEQ_CLIENT_SYSTEM: i32 = 0;
     pub const SND_SEQ_PORT_SYSTEM_ANNOUNCE: i32 = 1;
