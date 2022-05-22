@@ -167,6 +167,7 @@ pub struct MidiRecorder {
     event_buffer: VecDeque<RecordEvent>,
     #[allow(unused)]
     record_device: Device,
+    disconnected: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -277,14 +278,21 @@ impl MidiRecorder {
             poll_fd,
             event_buffer: VecDeque::new(),
             record_device,
+            disconnected: false,
         })
     }
 
+    /// Return the next recorded event from this MIDI device.
+    /// Returns a `std::io::ErrorKind::NotFound` when the device was disconnected.
     pub async fn next(&mut self) -> std::io::Result<RecordEvent> {
         loop {
             if let Some(event) = self.event_buffer.pop_front() {
                 trace!(client = self.client, "returning buffered event");
                 return Ok(event);
+            }
+
+            if self.disconnected {
+                return Err(std::io::ErrorKind::NotFound.into())
             }
 
             trace!(client = self.client, "waiting for read readiness");
@@ -297,10 +305,9 @@ impl MidiRecorder {
                     Ok(event) => {
                         debug!(
                             client = self.client,
-                            "got event: {:?} at {:?} note {:?}",
+                            "got event: {:?} at {:?}",
                             event.get_type(),
                             event.get_tick(),
-                            event.get_data::<EvNote>()
                         );
                         let tick = event.get_tick().expect("should have tick");
 
@@ -338,6 +345,11 @@ impl MidiRecorder {
                                     controller: ctrl.param,
                                     value: ctrl.value,
                                 })
+                            }
+                            EventType::PortUnsubscribed => {
+                                // No need to check which port as we only subscribed to one
+                                self.disconnected = true;
+                                None
                             }
                             _ => None,
                         };
