@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 alsa = "0.6.0"
 axum = "0.5.5"
+clap = { version = "3.1.18", features = ["derive"] }
 color-eyre = "0.6.1"
 futures-util = "0.3.21"
 serde = { version = "1.0.137", features = ["derive"] }

@@ -22,6 +22,6 @@ impl AppState {
 }
 
 
-pub struct Recorder {
+pub struct RecorderState {
     pub device: Device,
 }

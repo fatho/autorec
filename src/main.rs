@@ -2,6 +2,7 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
+use clap::Parser;
 use color_eyre::Result;
 use state::AppState;
 use std::net::SocketAddr;
@@ -15,10 +16,21 @@ mod recorder;
 mod server;
 mod state;
 
+/// Program to automatically start MIDI recordings of songs played on an attached MIDI device.
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Name of the MIDI client to attach to
+    #[clap(short('c'), long)]
+    midi_client: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
+
+    let args = Args::parse();
 
     // Initialize state
     let proto_state_ref = AppState::new_shared();
@@ -34,9 +46,10 @@ async fn main() -> Result<()> {
             let mut state = state_ref.lock().await;
 
             match event {
+                // TODO: devise more robust scheme to avoid connecting to our own clients
                 midi::DeviceEvent::Connected { device, info } => {
-                    // TODO: configurable filter
-                    if info.client_name.contains("Midi Through") {
+                    if info.client_name.contains(&args.midi_client) {
+                        info!("Matching client {} connected", info.client_name);
                         match MidiRecorder::new(device.clone()) {
                             Ok(mut rec) => {
                                 tokio::spawn(async move {
@@ -57,6 +70,8 @@ async fn main() -> Result<()> {
                             }
                         }
                         state.devices.insert(device, info);
+                    } else {
+                        info!("Ignoring client {}: no match", info.client_name);
                     }
                 }
                 midi::DeviceEvent::Disconnected { device } => {
