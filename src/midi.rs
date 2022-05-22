@@ -2,7 +2,9 @@
 
 use std::{collections::VecDeque, ffi::CStr, os::unix::prelude::RawFd};
 
-use alsa::seq::{Addr, PortCap, PortSubscribe, PortType, QueueTempo, PortInfo, EvNote, EventType};
+use alsa::seq::{
+    Addr, EvCtrl, EvNote, EventType, PortCap, PortInfo, PortSubscribe, PortType, QueueTempo,
+};
 use tokio::io::unix::AsyncFd;
 use tracing::{debug, trace};
 
@@ -78,8 +80,7 @@ impl MidiDeviceListener {
             client: helpers::SND_SEQ_CLIENT_SYSTEM,
             port: helpers::SND_SEQ_PORT_SYSTEM_ANNOUNCE,
         });
-        seq.subscribe_port(&subscribe)
-            .map_err(alsa_io_err)?;
+        seq.subscribe_port(&subscribe).map_err(alsa_io_err)?;
 
         // Set up polling via tokio
         let fds = alsa::poll::Descriptors::get(&(&seq, Some(alsa::Direction::Capture)))
@@ -154,7 +155,6 @@ impl MidiDeviceListener {
     }
 }
 
-
 pub struct MidiRecorder {
     seq: alsa::Seq,
     #[allow(unused)]
@@ -165,14 +165,32 @@ pub struct MidiRecorder {
     recv_queue: i32,
     poll_fd: AsyncFd<RawFd>,
     event_buffer: VecDeque<RecordEvent>,
+    #[allow(unused)]
     record_device: Device,
 }
 
 #[derive(Debug, Clone)]
-pub enum RecordEvent {
-    NoteOn,
-    NoteOff,
-    ControlChange,
+pub struct RecordEvent {
+    pub timestamp: u32,
+    pub payload: RecordPayload,
+}
+
+#[derive(Debug, Clone)]
+pub enum RecordPayload {
+    NoteOn {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        channel: u8,
+        note: u8,
+    },
+    ControlChange {
+        channel: u8,
+        controller: u32,
+        value: i32,
+    },
     // TODO: do we need more?
 }
 
@@ -196,7 +214,8 @@ impl MidiRecorder {
         tempo.set_ppq(96); // Pulses per Quarter note
         let bpm = 120;
         tempo.set_tempo(1000000 * 60 / bpm); // Microseconds per beat
-        seq.set_queue_tempo(recv_queue, &tempo).map_err(alsa_io_err)?;
+        seq.set_queue_tempo(recv_queue, &tempo)
+            .map_err(alsa_io_err)?;
 
         debug!(client, "configured queue {}", recv_queue);
 
@@ -207,18 +226,14 @@ impl MidiRecorder {
         recv_port_info.set_type(PortType::MIDI_GENERIC | PortType::APPLICATION);
 
         recv_port_info.set_midi_channels(16); // NOTE: does it matter? for now same as arecordmidi
-        recv_port_info.set_name(
-            unsafe { CStr::from_bytes_with_nul_unchecked(b"MIDI recording 1\0") },
-        );
+        recv_port_info
+            .set_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"MIDI recording 1\0") });
 
         // Enable timestamps for the events we receive
         recv_port_info.set_timestamp_queue(recv_queue);
         recv_port_info.set_timestamping(true);
 
-         // Technically UB because `create_port` actually mutates the port-info.
-        seq
-            .create_port(&recv_port_info)
-            .map_err(alsa_io_err)?;
+        seq.create_port(&recv_port_info).map_err(alsa_io_err)?;
         let recv_port = recv_port_info.get_port();
 
         debug!(client, "created port {}", recv_port);
@@ -233,8 +248,9 @@ impl MidiRecorder {
             client: record_device.client_id,
             port: record_device.port_id,
         });
-        seq.subscribe_port(&subscribe)
-            .map_err(alsa_io_err)?;
+        subscribe.set_queue(recv_queue);
+        subscribe.set_time_update(true);
+        seq.subscribe_port(&subscribe).map_err(alsa_io_err)?;
 
         debug!(client, "subcribed port to {}", record_device.id());
 
@@ -246,6 +262,12 @@ impl MidiRecorder {
         // of file descriptors for polling is hard-coded to one.
         assert_eq!(fds.len(), 1);
         let poll_fd = AsyncFd::new(fds[0].fd)?;
+
+        // Start the queue
+        debug!(client, recv_queue, "starting queue");
+        seq.control_queue(recv_queue, EventType::Start, 0, None)
+            .map_err(alsa_io_err)?;
+        seq.drain_output().map_err(alsa_io_err)?; // flush
 
         Ok(Self {
             seq,
@@ -273,16 +295,57 @@ impl MidiRecorder {
             loop {
                 match input.event_input() {
                     Ok(event) => {
-                        debug!(client = self.client, "got event: {:?} at {:?} note {:?}", event.get_type(), event.get_tick(), event.get_data::<EvNote>());
-                        // NOTE: A "note off" event can either be sent as "note off", or as "note on" with a zero velocity
-                        match event.get_type() {
+                        debug!(
+                            client = self.client,
+                            "got event: {:?} at {:?} note {:?}",
+                            event.get_type(),
+                            event.get_tick(),
+                            event.get_data::<EvNote>()
+                        );
+                        let tick = event.get_tick().expect("should have tick");
+
+                        let payload = match event.get_type() {
                             EventType::Noteon => {
-                                debug!("Note On");
+                                let note = event.get_data::<EvNote>().expect("must have note data");
+                                // NOTE: A "note off" event can either be sent as "note off", or as
+                                // "note on" with a zero velocity
+                                if note.velocity > 0 {
+                                    Some(RecordPayload::NoteOn {
+                                        channel: note.channel,
+                                        note: note.note,
+                                        velocity: note.velocity,
+                                    })
+                                } else {
+                                    Some(RecordPayload::NoteOff {
+                                        channel: note.channel,
+                                        note: note.note,
+                                    })
+                                }
                             }
                             EventType::Noteoff => {
-                                debug!("Note off");
+                                let note = event.get_data::<EvNote>().expect("must have note data");
+                                Some(RecordPayload::NoteOff {
+                                    channel: note.channel,
+                                    note: note.note,
+                                })
                             }
-                            _ => {}
+                            EventType::Controller => {
+                                let ctrl = event
+                                    .get_data::<EvCtrl>()
+                                    .expect("must have controller data");
+                                Some(RecordPayload::ControlChange {
+                                    channel: ctrl.channel,
+                                    controller: ctrl.param,
+                                    value: ctrl.value,
+                                })
+                            }
+                            _ => None,
+                        };
+                        if let Some(payload) = payload {
+                            self.event_buffer.push_back(RecordEvent {
+                                timestamp: tick, // TODO: handle tick overflow?
+                                payload,
+                            });
                         }
                     }
                     Err(err) if err.errno() == alsa::nix::errno::Errno::EAGAIN => {

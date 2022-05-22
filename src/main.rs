@@ -1,6 +1,6 @@
 use axum::{
     routing::{get, post},
-    Router, Extension,
+    Extension, Router,
 };
 use color_eyre::Result;
 use state::AppState;
@@ -19,8 +19,6 @@ mod state;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
-
-    error!(on = alsa::seq::EventType::Noteon as i32, off = alsa::seq::EventType::Noteoff as i32, "wtf");
 
     // Initialize state
     let proto_state_ref = AppState::new_shared();
@@ -43,15 +41,20 @@ async fn main() -> Result<()> {
                             Ok(mut rec) => {
                                 tokio::spawn(async move {
                                     loop {
-                                        let evt = rec.next().await?;
-                                        debug!("recorded event: {:?}", evt);
+                                        match rec.next().await {
+                                            Ok(evt) => debug!("recorded event: {:?}", evt),
+                                            Err(err) => {
+                                                error!("recording failed, stopping: {}", err);
+                                                break;
+                                            }
+                                        }
                                     }
                                     std::io::Result::Ok(())
                                 });
-                            },
+                            }
                             Err(err) => {
                                 error!("Failed to set up recorder for {}: {}", device.id(), err);
-                            },
+                            }
                         }
                         state.devices.insert(device, info);
                     }
