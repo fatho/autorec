@@ -42,11 +42,11 @@ pub enum DeviceEvent {
 #[derive(Debug, Clone)]
 pub struct RecordEvent {
     pub timestamp: u32,
-    pub payload: RecordPayload,
+    pub payload: MidiEvent,
 }
 
 #[derive(Debug, Clone)]
-pub enum RecordPayload {
+pub enum MidiEvent {
     NoteOn {
         channel: u8,
         note: u8,
@@ -61,10 +61,14 @@ pub enum RecordPayload {
         controller: u32,
         value: i32,
     },
-    RecordEnd,
     // TODO: do we need more?
 }
 
+#[derive(Debug, Clone)]
+pub struct PlaybackEvent {
+    pub timestamp: u32,
+    pub payload: MidiEvent,
+}
 
 pub struct Manager {
     registry: alsa_backend::MidiRegistry,
@@ -76,41 +80,24 @@ impl Manager {
     }
 
     pub fn create_device_listener(&self) -> color_eyre::Result<DeviceListener> {
-        Ok(DeviceListener {
-            inner: alsa_backend::DeviceListener::new(&self.registry)?
-        })
+        alsa_backend::DeviceListener::new(&self.registry)
     }
 
     pub fn create_recorder(&self, source: &Device) -> color_eyre::Result<Recorder> {
-        Ok(Recorder {
-            inner: alsa_backend::MidiRecorder::new(&self.registry, Addr {
-                client: source.client_id,
-                port: source.port_id,
-            })?
+        alsa_backend::MidiRecorder::new(&self.registry, Addr {
+            client: source.client_id,
+            port: source.port_id,
+        })
+    }
+
+    pub fn create_player(&self, dest: &Device) -> color_eyre::Result<Player> {
+        alsa_backend::MidiPlayer::new(&self.registry, Addr {
+            client: dest.client_id,
+            port: dest.port_id,
         })
     }
 }
 
-pub struct DeviceListener {
-    inner: alsa_backend::DeviceListener,
-}
-
-impl DeviceListener {
-    pub async fn next(&mut self) -> color_eyre::Result<DeviceEvent> {
-        self.inner.next().await
-    }
-}
-
-pub struct Recorder {
-    inner: alsa_backend::MidiRecorder,
-}
-
-impl Recorder {
-    pub async fn next(&mut self) -> color_eyre::Result<RecordEvent> {
-        self.inner.next().await
-    }
-
-    pub fn tick_to_duration(&self, tick: u32) -> std::time::Duration {
-        self.inner.tick_to_duration(tick)
-    }
-}
+pub type DeviceListener = alsa_backend::DeviceListener;
+pub type Recorder = alsa_backend::MidiRecorder;
+pub type Player = alsa_backend::MidiPlayer;

@@ -52,9 +52,17 @@ async fn main() -> Result<()> {
                         info!("Matching client {} connected", info.client_name);
                         match midi.create_recorder(&device) {
                             Ok(rec) => {
+                                let player = match midi.create_player(&device) {
+                                    Ok(player) => Some(player),
+                                    Err(err) => {
+                                        error!("Device does not support playback: {}", err);
+                                        None
+                                    }
+                                };
+
                                 tokio::spawn(async move {
                                     info!("Beginning recording");
-                                    if let Err(err) = recorder::run_recorder(rec).await {
+                                    if let Err(err) = recorder::run_recorder(rec, player).await {
                                         error!("Recorder failed: {}", err)
                                     } else {
                                         info!("Recorder shut down");

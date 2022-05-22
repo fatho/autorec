@@ -16,3 +16,4 @@ Goals:
     Convenience:
         ☐ Add proper config file format
         ☐ Add special "chord" for immediately starting new song (e.g. pressing two lowest keys)
+        ☐ Play short tunes for notifications (e.g. "recording up and running" or "song finished")
