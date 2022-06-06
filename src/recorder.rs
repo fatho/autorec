@@ -8,6 +8,32 @@ pub async fn run_recorder(
     mut recorder: midi::Recorder,
     mut player: Option<midi::Player>,
 ) -> color_eyre::Result<()> {
+
+    if let Some(player) = player.as_mut() {
+        info!("Playing back tones");
+        // Normalize timestamps
+
+        // Play
+        player.begin_playback().await?;
+        for i in 0..2000 {
+            trace!("generating note {}", i + 1);
+            let note = 64 + (i % 12) as u8;
+            player
+                .write(&PlaybackEvent {
+                    timestamp: i * 48,
+                    payload: midi::MidiEvent::NoteOn { channel: 0, note, velocity: 64 },
+                })
+                .await?;
+                player
+                .write(&PlaybackEvent {
+                    timestamp: i * 48 + 24,
+                    payload: midi::MidiEvent::NoteOff { channel: 0, note },
+                })
+                .await?;
+        }
+        player.end_playback().await?;
+    }
+
     loop {
         info!("Waiting for song to start");
         let event = recorder.next().await?;
@@ -25,16 +51,16 @@ pub async fn run_recorder(
                 song.iter_mut().for_each(|ev| ev.timestamp -= first_tick);
 
                 // Play
-                let mut playback = player.begin_playback()?;
+                let mut playback = player.begin_playback().await?;
                 for ev in song {
-                    playback
+                    player
                         .write(&PlaybackEvent {
                             timestamp: ev.timestamp,
                             payload: ev.payload,
                         })
                         .await?
                 }
-                playback.end().await?;
+                player.end_playback().await?;
             }
         } else {
             break;

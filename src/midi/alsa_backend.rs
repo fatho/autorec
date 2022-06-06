@@ -7,12 +7,12 @@ use std::{
 
 use alsa::{
     seq::{
-        Addr, EvCtrl, EvNote, Event, EventType, PortCap, PortInfo, PortSubscribe, PortType,
-        QueueTempo, EvQueueControl,
+        Addr, EvCtrl, EvNote, EvQueueControl, Event, EventType, PortCap, PortInfo, PortSubscribe,
+        PortType, QueueTempo,
     },
     Direction,
 };
-use tokio::io::unix::AsyncFd;
+use tokio::io::{unix::AsyncFd, Interest};
 use tracing::{debug, trace, warn};
 
 use super::{DeviceEvent, MidiEvent, PlaybackEvent, RecordEvent};
@@ -400,6 +400,7 @@ pub struct MidiPlayer {
     send_port: i32,
     send_queue: i32,
     dest: Addr,
+    max_tick: u32,
 }
 
 impl MidiPlayer {
@@ -464,7 +465,7 @@ impl MidiPlayer {
         // Theoretically, there could be more FDs, but it seems that for Alsa Sequencers, the number
         // of file descriptors for polling is hard-coded to one.
         assert_eq!(fds.len(), 1);
-        let poll_fd = AsyncFd::new(fds[0].fd)?;
+        let poll_fd = AsyncFd::with_interest(fds[0].fd, Interest::WRITABLE)?;
 
         Ok(Self {
             client,
@@ -472,29 +473,40 @@ impl MidiPlayer {
             send_port,
             send_queue,
             dest,
+            max_tick: 0,
         })
     }
 
-    pub fn begin_playback(&mut self) -> color_eyre::Result<MidiPlayback> {
+    pub async fn begin_playback(&mut self) -> color_eyre::Result<()> {
+        self.max_tick = 0;
         // Start the queue
         debug!(
             client = self.client.id,
             send_queue = self.send_queue,
             "starting queue"
         );
-        self.client
-            .seq
-            .control_queue(self.send_queue, EventType::Start, 0, None)?;
-        Ok(MidiPlayback { player: self, max_tick: 0 })
+        let mut start_event = Event::new(
+            EventType::Start,
+            &EvQueueControl {
+                queue: self.send_queue,
+                value: (),
+            },
+        );
+        start_event.set_direct();
+        start_event.set_source(self.send_port);
+        start_event.set_dest(Addr {
+            client: internal::SND_SEQ_CLIENT_SYSTEM,
+            port: internal::SND_SEQ_PORT_SYSTEM_TIMER,
+        });
+
+        self.output_event(&mut start_event).await?;
+
+        self.drain().await?;
+
+        Ok(())
     }
-}
 
-pub struct MidiPlayback<'a> {
-    player: &'a mut MidiPlayer,
-    max_tick: u32,
-}
 
-impl<'a> MidiPlayback<'a> {
     pub async fn write(&mut self, event: &PlaybackEvent) -> color_eyre::Result<()> {
         let mut midi_event = match event.payload {
             MidiEvent::NoteOn {
@@ -538,55 +550,91 @@ impl<'a> MidiPlayback<'a> {
                 },
             ),
         };
-        midi_event.set_source(self.player.send_port);
-        midi_event.set_dest(self.player.dest);
+        midi_event.set_source(self.send_port);
+        midi_event.set_dest(self.dest);
         let tick = event.timestamp.max(self.max_tick);
-        midi_event.schedule_tick(self.player.send_queue, false, tick);
+        midi_event.schedule_tick(self.send_queue, false, tick);
         self.max_tick = tick;
 
-       self.output_event(&mut midi_event).await
+        self.output_event(&mut midi_event).await?;
+
+        Ok(())
     }
 
-    pub async fn end(mut self) -> color_eyre::Result<()> {
-        let mut stop_event = Event::new(EventType::Stop, &EvQueueControl {
-            queue: self.player.send_queue,
-            value: (),
+    pub async fn end_playback(&mut self) -> color_eyre::Result<()> {
+        let mut stop_event = Event::new(
+            EventType::Stop,
+            &EvQueueControl {
+                queue: self.send_queue,
+                value: (),
+            },
+        );
+        stop_event.set_source(self.send_port);
+        stop_event.set_dest(Addr {
+            client: internal::SND_SEQ_CLIENT_SYSTEM,
+            port: internal::SND_SEQ_PORT_SYSTEM_TIMER,
         });
-        stop_event.set_source(self.player.send_port);
-        stop_event.set_dest(Addr { client: internal::SND_SEQ_CLIENT_SYSTEM, port: internal::SND_SEQ_PORT_SYSTEM_TIMER });
-        stop_event.schedule_tick(self.player.send_queue, false, self.max_tick + 1);
+        stop_event.schedule_tick(self.send_queue, false, self.max_tick + 1);
 
         self.output_event(&mut stop_event).await?;
 
-        self.player.client.seq.drain_output()?;
+        self.drain().await?;
 
         // TODO: how to wait for everything to actually be sent
 
         Ok(())
     }
 
-    async fn output_event(&mut self, midi_event: &mut Event<'_>) -> color_eyre::Result<()> {
+    async fn output_event(&mut self, midi_event: &mut Event<'_>) -> std::io::Result<()> {
         loop {
             // BUG: this never becomes ready after the first `EGAIN` - what's going on?
-            let mut write_guard = self.player.poll_fd.writable().await?;
 
-            match self.player.client.seq.event_output(midi_event) {
-                Ok(_remaining) => {
-                    write_guard.retain_ready();
-                    return Ok(())
-                },
+            let result = self.client.seq.event_output_buffer(midi_event);
+
+            match result {
+                Ok(buf_size) => {
+                    trace!("buffered event {:?}, buffer size={}", midi_event, buf_size);
+                    return Ok(());
+                }
                 Err(err) if err.errno() == alsa::nix::errno::Errno::EAGAIN => {
-                    debug!("output buffer full - waiting");
-                    write_guard.clear_ready();
+                    trace!("output buffer full");
+                    self.drain().await?;
                     continue;
-                },
+                }
                 Err(err) => {
                     return Err(err.errno().into());
                 }
             }
         }
     }
+
+    async fn drain(&mut self) -> std::io::Result<()> {
+        trace!("draining output");
+        loop {
+            trace!("acquiring write guard");
+            let mut write_guard = self.poll_fd.writable().await?;
+            let result = self.client.seq.drain_output();
+            match result {
+                Ok(ret) => {
+                    trace!("write successful, {ret} written");
+                    write_guard.retain_ready();
+                    return Ok(())
+                },
+                Err(err) => {
+                    trace!("write failed with {}", err.errno());
+                    if err.errno() == alsa::nix::errno::Errno::EAGAIN {
+                        write_guard.clear_ready();
+                        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue
+                    } else {
+                        return Err(err.errno().into())
+                    }
+                },
+            }
+        }
+    }
 }
+
 
 mod internal {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};
