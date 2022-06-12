@@ -37,10 +37,11 @@ pub async fn startpage(state_ref: Extension<AppStateRef>) -> axum::response::Htm
     use build_html::*;
 
     let state = state_ref.lock().unwrap();
-    let songs = state.query_songs().unwrap_or_else(|err| {
+    let mut songs = state.query_songs().unwrap_or_else(|err| {
         error!("Failed to list songs: {}", err);
         vec![]
     });
+    songs.sort_by(|a, b| b.cmp(a));
 
     let mut songs_html = Container::new(ContainerType::OrderedList);
 
