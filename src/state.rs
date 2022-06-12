@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tracing::info;
+
 use crate::{
     args::Args,
     midi::{Device, DeviceInfo, MidiEvent, RecordEvent},
@@ -14,14 +16,18 @@ pub type AppStateRef = Arc<Mutex<AppState>>;
 #[derive(Default, Debug)]
 pub struct AppState {
     pub devices: HashMap<Device, DeviceInfo>,
+    pub connected_device: Option<Device>,
     pub song_dir: PathBuf,
+    pub player: Option<std::process::Child>,
 }
 
 impl AppState {
     pub fn new(cfg: &Args) -> Self {
         Self {
             devices: Default::default(),
+            connected_device: None,
             song_dir: cfg.song_directory.clone(),
+            player: None,
         }
     }
 
@@ -29,7 +35,19 @@ impl AppState {
         Arc::new(Mutex::new(AppState::new(cfg)))
     }
 
-    pub fn store_song(&mut self, name: &str, events: Vec<RecordEvent>) -> Result<(), std::io::Error> {
+    pub fn query_songs(&self) -> std::io::Result<Vec<String>> {
+        let mut songs = Vec::new();
+
+        for song in std::fs::read_dir(&self.song_dir)? {
+            if let Some(name) = song?.file_name().to_str().and_then(|name| name.strip_suffix(".mid")) {
+                songs.push(name.to_owned())
+            }
+        }
+
+        Ok(songs)
+    }
+
+    pub fn store_song(&mut self, name: &str, events: Vec<RecordEvent>) -> std::io::Result<()> {
         let mut filepath = self.song_dir.join(name);
         filepath.set_extension("mid");
 
@@ -86,6 +104,37 @@ impl AppState {
         smf.tracks.push(track);
 
         smf.save(filepath)
+    }
+
+    pub fn play_song(&mut self, name: String) -> std::io::Result<()> {
+        let mut filepath = self.song_dir.join(name);
+        filepath.set_extension("mid");
+
+        if let Some(dev) = self.connected_device.as_ref() {
+            info!("Playing {}", filepath.display());
+
+            if let Some(mut previous_player) = self.player.take() {
+                // TODO: should probably have a separate thread for `wait`ing.
+                if previous_player.try_wait()?.is_none() {
+                    use nix::unistd::Pid;
+                    use nix::sys::signal;
+                    // still running, stop it
+                    let _ = signal::kill(Pid::from_raw(previous_player.id() as i32), signal::SIGINT);
+                    previous_player.wait()?;
+                }
+            }
+
+            // hackedy hack
+            let player = std::process::Command::new("aplaymidi")
+                .arg("-p")
+                .arg(dev.id())
+                .arg(filepath)
+                .spawn()?;
+
+            self.player = Some(player);
+        }
+
+        Ok(())
     }
 }
 

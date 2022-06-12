@@ -40,38 +40,39 @@ async fn main() -> Result<()> {
 
             match event {
                 midi::DeviceEvent::Connected { device, info } => {
-                    if info.client_name.contains(&args.midi_client) {
-                        info!("Matching client {} connected", info.client_name);
-                        match midi.create_recorder(&device) {
-                            Ok(rec) => {
-                                // let player = match midi.create_player(&device) {
-                                //     Ok(player) => Some(player),
-                                //     Err(err) => {
-                                //         error!("Device does not support playback: {}", err);
-                                //         None
-                                //     }
-                                // };
+                    let mut state = state_ref.lock().unwrap();
 
-                                let inner_state_ref = state_ref.clone();
-                                tokio::spawn(async move {
-                                    info!("Beginning recording");
-                                    if let Err(err) = recorder::run_recorder(inner_state_ref, rec).await {
-                                        error!("Recorder failed: {}", err)
-                                    } else {
-                                        info!("Recorder shut down");
-                                    }
-                                });
-                            }
-                            Err(err) => {
-                                error!("Failed to set up recorder for {}: {}", device.id(), err);
+                    if info.client_name.contains(&args.midi_client) {
+                        if let Some(dev) = state.connected_device.as_ref() {
+                            info!("Already recording on {}", dev.id());
+                        } else {
+                            info!("Matching client {} connected", info.client_name);
+                            state.connected_device = Some(device.clone());
+                            match midi.create_recorder(&device) {
+                                Ok(rec) => {
+                                    let inner_state_ref = state_ref.clone();
+                                    tokio::spawn(async move {
+                                        info!("Beginning recording");
+                                        if let Err(err) = recorder::run_recorder(inner_state_ref.clone(), rec).await {
+                                            error!("Recorder failed: {}", err)
+                                        } else {
+                                            info!("Recorder shut down");
+                                        }
+                                        // reset recording state
+                                        let mut state = inner_state_ref.lock().unwrap();
+                                        state.connected_device = None;
+                                    });
+                                }
+                                Err(err) => {
+                                    error!("Failed to set up recorder for {}: {}", device.id(), err);
+                                }
                             }
                         }
-
-                        let mut state = state_ref.lock().unwrap();
-                        state.devices.insert(device, info);
                     } else {
                         info!("Ignoring client {}: no match", info.client_name);
                     }
+
+                    state.devices.insert(device, info);
                 }
                 midi::DeviceEvent::Disconnected { device } => {
                     let mut state = state_ref.lock().unwrap();
@@ -88,8 +89,10 @@ async fn main() -> Result<()> {
     let state_ref = proto_state_ref.clone();
     let web_thread = tokio::spawn(async move {
         let app = Router::new()
+            .route("/", get(server::startpage))
             .route("/devices", get(server::devices))
             .route("/debug", get(server::debug))
+            .route("/play", post(server::play))
             .layer(Extension(state_ref));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

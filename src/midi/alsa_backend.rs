@@ -7,15 +7,15 @@ use std::{
 
 use alsa::{
     seq::{
-        Addr, EvCtrl, EvNote, EvQueueControl, Event, EventType, PortCap, PortInfo, PortSubscribe,
+        Addr, EvCtrl, EvNote, EventType, PortCap, PortInfo, PortSubscribe,
         PortType, QueueTempo,
     },
     Direction,
 };
-use tokio::io::{unix::AsyncFd, Interest};
+use tokio::io::{unix::AsyncFd};
 use tracing::{debug, trace, warn};
 
-use super::{DeviceEvent, MidiEvent, PlaybackEvent, RecordEvent};
+use super::{DeviceEvent, MidiEvent, RecordEvent};
 
 /// There should only be one instance of this.
 #[derive(Debug, Clone)]
@@ -394,247 +394,6 @@ impl MidiRecorder {
     }
 }
 
-pub struct MidiPlayer {
-    client: Client,
-    poll_fd: AsyncFd<RawFd>,
-    send_port: i32,
-    send_queue: i32,
-    dest: Addr,
-    max_tick: u32,
-}
-
-impl MidiPlayer {
-    pub fn new(registry: &MidiRegistry, dest: Addr) -> color_eyre::Result<Self> {
-        let client = registry.new_client("autorec-player")?;
-
-        // Create queue for receiving events
-        let send_queue = client.seq.alloc_queue()?;
-
-        debug!(client = client.id, "created queue {}", send_queue);
-
-        // These should be the defaults, but better to spell it out
-        let tempo = QueueTempo::empty()?;
-
-        // These need to be the same as the ones during the recording
-        let bpm = 120;
-        let ppq = 96;
-        tempo.set_ppq(ppq); // Pulses per Quarter note
-        tempo.set_tempo(1000000 * 60 / bpm); // Microseconds per beat
-        client.seq.set_queue_tempo(send_queue, &tempo)?;
-
-        debug!(client = client.id, "configured queue {}", send_queue);
-
-        // Create local port for receiving events
-        let mut send_port_info = PortInfo::empty()?;
-        // Make it readable
-        // TODO: aplaymidi uses 0 for the capability field, why?
-        send_port_info.set_capability(PortCap::READ | PortCap::SUBS_READ);
-        send_port_info.set_type(PortType::MIDI_GENERIC | PortType::APPLICATION);
-
-        send_port_info
-            .set_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"MIDI playback 1\0") });
-
-        // // Enable timestamps for the events we receive
-        // send_port_info.set_timestamp_queue(send_queue);
-        // send_port_info.set_timestamping(true);
-
-        client.seq.create_port(&send_port_info)?;
-        let send_port = send_port_info.get_port();
-
-        debug!(client = client.id, "created port {}", send_port);
-
-        // Subscribe client via local port to the MIDI target
-        let subscribe = PortSubscribe::empty()?;
-        subscribe.set_sender(Addr {
-            client: client.id,
-            port: send_port,
-        });
-        subscribe.set_dest(dest);
-        subscribe.set_queue(send_queue);
-        subscribe.set_time_update(true);
-        client.seq.subscribe_port(&subscribe)?;
-
-        debug!(
-            client = client.id,
-            "subcribed {}:{} to player", dest.client, dest.port
-        );
-
-        // Set up polling via tokio
-        let fds = alsa::poll::Descriptors::get(&(&client.seq, Some(Direction::Playback)))?;
-        tracing::debug!("Sequencer fds {fds:?}");
-        // Theoretically, there could be more FDs, but it seems that for Alsa Sequencers, the number
-        // of file descriptors for polling is hard-coded to one.
-        assert_eq!(fds.len(), 1);
-        let poll_fd = AsyncFd::with_interest(fds[0].fd, Interest::WRITABLE)?;
-
-        Ok(Self {
-            client,
-            poll_fd,
-            send_port,
-            send_queue,
-            dest,
-            max_tick: 0,
-        })
-    }
-
-    pub async fn begin_playback(&mut self) -> color_eyre::Result<()> {
-        self.max_tick = 0;
-        // Start the queue
-        debug!(
-            client = self.client.id,
-            send_queue = self.send_queue,
-            "starting queue"
-        );
-        let mut start_event = Event::new(
-            EventType::Start,
-            &EvQueueControl {
-                queue: self.send_queue,
-                value: (),
-            },
-        );
-        start_event.set_direct();
-        start_event.set_source(self.send_port);
-        start_event.set_dest(Addr {
-            client: internal::SND_SEQ_CLIENT_SYSTEM,
-            port: internal::SND_SEQ_PORT_SYSTEM_TIMER,
-        });
-
-        self.output_event(&mut start_event).await?;
-
-        self.drain().await?;
-
-        Ok(())
-    }
-
-
-    pub async fn write(&mut self, event: &PlaybackEvent) -> color_eyre::Result<()> {
-        let mut midi_event = match event.payload {
-            MidiEvent::NoteOn {
-                channel,
-                note,
-                velocity,
-            } => {
-                Event::new(
-                    EventType::Noteon,
-                    &EvNote {
-                        channel,
-                        note,
-                        velocity,
-                        // not required:
-                        off_velocity: 0,
-                        duration: 0,
-                    },
-                )
-            }
-            MidiEvent::NoteOff { channel, note } => Event::new(
-                EventType::Noteoff,
-                &EvNote {
-                    channel,
-                    note,
-                    // not required:
-                    velocity: 0,
-                    off_velocity: 0,
-                    duration: 0,
-                },
-            ),
-            MidiEvent::ControlChange {
-                channel,
-                controller,
-                value,
-            } => Event::new(
-                EventType::Controller,
-                &EvCtrl {
-                    channel,
-                    param: controller,
-                    value,
-                },
-            ),
-        };
-        midi_event.set_source(self.send_port);
-        midi_event.set_dest(self.dest);
-        let tick = event.timestamp.max(self.max_tick);
-        midi_event.schedule_tick(self.send_queue, false, tick);
-        self.max_tick = tick;
-
-        self.output_event(&mut midi_event).await?;
-
-        Ok(())
-    }
-
-    pub async fn end_playback(&mut self) -> color_eyre::Result<()> {
-        let mut stop_event = Event::new(
-            EventType::Stop,
-            &EvQueueControl {
-                queue: self.send_queue,
-                value: (),
-            },
-        );
-        stop_event.set_source(self.send_port);
-        stop_event.set_dest(Addr {
-            client: internal::SND_SEQ_CLIENT_SYSTEM,
-            port: internal::SND_SEQ_PORT_SYSTEM_TIMER,
-        });
-        stop_event.schedule_tick(self.send_queue, false, self.max_tick + 1);
-
-        self.output_event(&mut stop_event).await?;
-
-        self.drain().await?;
-
-        // TODO: how to wait for everything to actually be sent
-
-        Ok(())
-    }
-
-    async fn output_event(&mut self, midi_event: &mut Event<'_>) -> std::io::Result<()> {
-        loop {
-            // BUG: this never becomes ready after the first `EGAIN` - what's going on?
-
-            let result = self.client.seq.event_output_buffer(midi_event);
-
-            match result {
-                Ok(buf_size) => {
-                    trace!("buffered event {:?}, buffer size={}", midi_event, buf_size);
-                    return Ok(());
-                }
-                Err(err) if err.errno() == alsa::nix::errno::Errno::EAGAIN => {
-                    trace!("output buffer full");
-                    self.drain().await?;
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err.errno().into());
-                }
-            }
-        }
-    }
-
-    async fn drain(&mut self) -> std::io::Result<()> {
-        trace!("draining output");
-        loop {
-            trace!("acquiring write guard");
-            let mut write_guard = self.poll_fd.writable().await?;
-            let result = self.client.seq.drain_output();
-            match result {
-                Ok(ret) => {
-                    trace!("write successful, {ret} written");
-                    write_guard.retain_ready();
-                    return Ok(())
-                },
-                Err(err) => {
-                    trace!("write failed with {}", err.errno());
-                    if err.errno() == alsa::nix::errno::Errno::EAGAIN {
-                        write_guard.clear_ready();
-                        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue
-                    } else {
-                        return Err(err.errno().into())
-                    }
-                },
-            }
-        }
-    }
-}
-
 
 mod internal {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};
@@ -642,7 +401,6 @@ mod internal {
     use crate::midi::DeviceInfo;
 
     pub const SND_SEQ_CLIENT_SYSTEM: i32 = 0;
-    pub const SND_SEQ_PORT_SYSTEM_TIMER: i32 = 0;
     pub const SND_SEQ_PORT_SYSTEM_ANNOUNCE: i32 = 1;
 
     /// Check whether the given port is suitable as a source for autorec.

@@ -64,12 +64,6 @@ pub enum MidiEvent {
     // TODO: do we need more?
 }
 
-#[derive(Debug, Clone)]
-pub struct PlaybackEvent {
-    pub timestamp: u32,
-    pub payload: MidiEvent,
-}
-
 pub struct Manager {
     registry: alsa_backend::MidiRegistry,
 }
@@ -89,15 +83,7 @@ impl Manager {
             port: source.port_id,
         })
     }
-
-    pub fn create_player(&self, dest: &Device) -> color_eyre::Result<Player> {
-        alsa_backend::MidiPlayer::new(&self.registry, Addr {
-            client: dest.client_id,
-            port: dest.port_id,
-        })
-    }
 }
 
 pub type DeviceListener = alsa_backend::DeviceListener;
 pub type Recorder = alsa_backend::MidiRecorder;
-pub type Player = alsa_backend::MidiPlayer;
