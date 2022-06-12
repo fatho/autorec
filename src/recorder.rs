@@ -1,66 +1,26 @@
 use std::time::Duration;
 
-use tracing::{info, trace};
+use tracing::{info, trace, error};
 
-use crate::midi::{self, PlaybackEvent, RecordEvent};
+use crate::{midi::{self, RecordEvent}, state::AppStateRef};
 
 pub async fn run_recorder(
+    app_state: AppStateRef,
     mut recorder: midi::Recorder,
-    mut player: Option<midi::Player>,
 ) -> color_eyre::Result<()> {
-
-    if let Some(player) = player.as_mut() {
-        info!("Playing back tones");
-        // Normalize timestamps
-
-        // Play
-        player.begin_playback().await?;
-        for i in 0..2000 {
-            trace!("generating note {}", i + 1);
-            let note = 64 + (i % 12) as u8;
-            player
-                .write(&PlaybackEvent {
-                    timestamp: i * 48,
-                    payload: midi::MidiEvent::NoteOn { channel: 0, note, velocity: 64 },
-                })
-                .await?;
-                player
-                .write(&PlaybackEvent {
-                    timestamp: i * 48 + 24,
-                    payload: midi::MidiEvent::NoteOff { channel: 0, note },
-                })
-                .await?;
-        }
-        player.end_playback().await?;
-    }
-
     loop {
         info!("Waiting for song to start");
         let event = recorder.next().await?;
 
         if let Some(event) = event {
-            let mut song = record_song(event, &mut recorder).await?;
+            let song = record_song(event, &mut recorder).await?;
+            let mut state = app_state.lock().unwrap();
 
-            if let Some(player) = player.as_mut() {
-                info!("Playing back song");
-                // Normalize timestamps
-                let first_tick = song
-                    .first()
-                    .expect("at least one event is guaranteed")
-                    .timestamp;
-                song.iter_mut().for_each(|ev| ev.timestamp -= first_tick);
-
-                // Play
-                let mut playback = player.begin_playback().await?;
-                for ev in song {
-                    player
-                        .write(&PlaybackEvent {
-                            timestamp: ev.timestamp,
-                            payload: ev.payload,
-                        })
-                        .await?
-                }
-                player.end_playback().await?;
+            let name = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+            if let Err(err) = state.store_song(&name, song) {
+                error!("Failed to save song '{}': {}", name, err);
+            } else {
+                info!("Recorded song '{}'", name);
             }
         } else {
             break;
@@ -70,20 +30,23 @@ pub async fn run_recorder(
 }
 
 pub async fn record_song(
-    first_event: RecordEvent,
+    mut first_event: RecordEvent,
     recorder: &mut midi::Recorder,
 ) -> color_eyre::Result<Vec<RecordEvent>> {
     info!("Song started");
 
     trace!("recorded event {:?}", first_event);
     let start_tick = first_event.timestamp;
+    first_event.timestamp = 0;
     let mut events = vec![first_event];
 
     loop {
         match tokio::time::timeout(Duration::from_secs(5), recorder.next()).await {
             Ok(event) => {
-                if let Some(event) = event? {
-                    let reltime = recorder.tick_to_duration(event.timestamp - start_tick);
+                if let Some(mut event) = event? {
+                    // Normalize timestamps relative to first event of this song
+                    event.timestamp -= start_tick;
+                    let reltime = recorder.tick_to_duration(event.timestamp);
                     trace!(
                         "recorded event {:?} at {:.3}s",
                         event,

@@ -5,33 +5,26 @@ use axum::{
 use clap::Parser;
 use color_eyre::Result;
 use state::AppState;
-use std::net::SocketAddr;
+use std::{net::SocketAddr};
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
 
+mod args;
 mod midi;
 mod recorder;
 mod server;
 mod state;
 
-/// Program to automatically start MIDI recordings of songs played on an attached MIDI device.
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-struct Args {
-    /// Name of the MIDI client to attach to
-    #[clap(short('c'), long)]
-    midi_client: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
 
-    let args = Args::parse();
+    let args = args::Args::parse();
 
     // Initialize state
-    let proto_state_ref = AppState::new_shared();
+    let proto_state_ref = AppState::new_shared(&args);
 
     // Set up midi context
     let midi = midi::Manager::new();
@@ -44,7 +37,6 @@ async fn main() -> Result<()> {
         loop {
             let event = devices.next().await?;
             debug!("Got device event: {event:?}");
-            let mut state = state_ref.lock().await;
 
             match event {
                 midi::DeviceEvent::Connected { device, info } => {
@@ -52,17 +44,18 @@ async fn main() -> Result<()> {
                         info!("Matching client {} connected", info.client_name);
                         match midi.create_recorder(&device) {
                             Ok(rec) => {
-                                let player = match midi.create_player(&device) {
-                                    Ok(player) => Some(player),
-                                    Err(err) => {
-                                        error!("Device does not support playback: {}", err);
-                                        None
-                                    }
-                                };
+                                // let player = match midi.create_player(&device) {
+                                //     Ok(player) => Some(player),
+                                //     Err(err) => {
+                                //         error!("Device does not support playback: {}", err);
+                                //         None
+                                //     }
+                                // };
 
+                                let inner_state_ref = state_ref.clone();
                                 tokio::spawn(async move {
                                     info!("Beginning recording");
-                                    if let Err(err) = recorder::run_recorder(rec, player).await {
+                                    if let Err(err) = recorder::run_recorder(inner_state_ref, rec).await {
                                         error!("Recorder failed: {}", err)
                                     } else {
                                         info!("Recorder shut down");
@@ -74,12 +67,14 @@ async fn main() -> Result<()> {
                             }
                         }
 
+                        let mut state = state_ref.lock().unwrap();
                         state.devices.insert(device, info);
                     } else {
                         info!("Ignoring client {}: no match", info.client_name);
                     }
                 }
                 midi::DeviceEvent::Disconnected { device } => {
+                    let mut state = state_ref.lock().unwrap();
                     state.devices.remove(&device);
                 }
             }

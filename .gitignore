@@ -2,3 +2,6 @@
 
 # Editor stuff
 /.vscode
+
+# Program output
+/songs

@@ -12,7 +12,7 @@ pub struct DeviceObject {
 
 /// Return list of devices
 pub async fn devices(state_ref: Extension<AppStateRef>) -> Json<Vec<DeviceObject>> {
-    let state = state_ref.lock().await;
+    let state = state_ref.lock().unwrap();
 
     let result = state.devices.iter().map(|(device, info)| DeviceObject {
         id: device.id(),
@@ -24,7 +24,7 @@ pub async fn devices(state_ref: Extension<AppStateRef>) -> Json<Vec<DeviceObject
 
 /// Return debug-printed state
 pub async fn debug(state_ref: Extension<AppStateRef>) -> String {
-    let state = state_ref.lock().await;
+    let state = state_ref.lock().unwrap();
 
     format!("{:#?}", state)
 }
