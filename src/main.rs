@@ -93,6 +93,7 @@ async fn main() -> Result<()> {
             .route("/devices", get(server::devices))
             .route("/debug", get(server::debug))
             .route("/play", post(server::play))
+            .route("/stop", post(server::stop))
             .layer(Extension(state_ref));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

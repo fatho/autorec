@@ -66,13 +66,29 @@ pub async fn startpage(state_ref: Extension<AppStateRef>) -> axum::response::Htm
                     body: JSON.stringify({'name': songs[index]})
                 }
             );
-        }")
+        }
+
+        async function stop() {
+            await fetch(
+                '/stop',
+                {
+                    'method': 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(null)
+                }
+            );
+        }
+        ")
         .with_title("AutoRec")
         .with_header(1, "AutoRec")
         .with_container(
             Container::new(ContainerType::Article)
                 .with_attributes([("id", "article1")])
                 .with_header(2, "Recorded Songs")
+                .with_link_attr("#", "(Stop playback)", [("onclick", format!("stop()").as_str())])
                 .with_container(songs_html),
         );
 
@@ -89,6 +105,15 @@ pub async fn play(state_ref: Extension<AppStateRef>, Json(request): Json<PlayReq
     let mut state = state_ref.lock().unwrap();
 
     match state.play_song(request.name) {
+        Ok(()) => Ok(Json("ok".to_owned())),
+        Err(err) => Err(Json(err.to_string())),
+    }
+}
+
+pub async fn stop(state_ref: Extension<AppStateRef>, Json(request): Json<()>) -> Result<Json<String>, Json<String>> {
+    let mut state = state_ref.lock().unwrap();
+
+    match state.stop_song() {
         Ok(()) => Ok(Json("ok".to_owned())),
         Err(err) => Err(Json(err.to_string())),
     }

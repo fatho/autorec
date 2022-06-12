@@ -136,6 +136,21 @@ impl AppState {
 
         Ok(())
     }
+
+    pub fn stop_song(&mut self) -> std::io::Result<()> {
+        if let Some(mut previous_player) = self.player.take() {
+            if previous_player.try_wait()?.is_none() {
+                use nix::unistd::Pid;
+                use nix::sys::signal;
+                // still running, stop it
+                let _ = signal::kill(Pid::from_raw(previous_player.id() as i32), signal::SIGINT);
+                previous_player.wait()?;
+            }
+            Ok(())
+        } else {
+            Err(std::io::ErrorKind::NotFound.into())
+        }
+    }
 }
 
 pub struct RecorderState {
