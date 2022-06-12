@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -9,6 +11,7 @@ pub struct DeviceObject {
     id: String,
     description: String,
 }
+
 
 /// Return list of devices
 pub async fn devices(state_ref: Extension<AppStateRef>) -> Json<Vec<DeviceObject>> {
@@ -33,9 +36,25 @@ pub async fn debug(state_ref: Extension<AppStateRef>) -> String {
     format!("{:#?}", state)
 }
 
-pub async fn startpage(state_ref: Extension<AppStateRef>) -> axum::response::Html<String> {
-    use build_html::*;
+macro_rules! template_source {
+    ($name:expr) => {
+        {
+            #[cfg(debug_assertions)]
+            fn get_source() -> std::io::Result<Cow<'static, str>> {
+                std::fs::read_to_string(concat!("templates/", $name)).map(Cow::Owned)
+            }
 
+            #[cfg(not(debug_assertions))]
+            fn get_source() -> std::io::Result<Cow<'static, str>> {
+                Ok(Cow::Borrowed(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/", $name))))
+            }
+
+            get_source()
+        }
+    };
+}
+
+pub async fn startpage(state_ref: Extension<AppStateRef>) -> Result<axum::response::Html<String>, String> {
     let state = state_ref.lock().unwrap();
     let mut songs = state.query_songs().unwrap_or_else(|err| {
         error!("Failed to list songs: {}", err);
@@ -43,58 +62,20 @@ pub async fn startpage(state_ref: Extension<AppStateRef>) -> axum::response::Htm
     });
     songs.sort_by(|a, b| b.cmp(a));
 
-    let mut songs_html = Container::new(ContainerType::OrderedList);
+    let source = template_source!("main.html.liquid").map_err(|err| err.to_string())?;
 
-    let songs_js = serde_json::to_string(&songs).unwrap();
+    let template = liquid::ParserBuilder::with_stdlib()
+        .build().map_err(|err| err.to_string())?
+        .parse(&source).map_err(|err| err.to_string())?;
 
-    for (index, song) in songs.iter().enumerate() {
-        songs_html.add_link_attr("#", song, [("onclick", format!("play({index})").as_str())]);
-    }
+    let globals = liquid::object!({
+        "songs": songs
+    });
 
-    let page = HtmlPage::new()
-        .with_script_literal(format!("var songs = {songs_js};"))
-        .with_script_literal(r"
-        async function play(index) {
-            await fetch(
-                '/play',
-                {
-                    'method': 'POST',
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({'name': songs[index]})
-                }
-            );
-        }
+    let output = template.render(&globals).unwrap();
 
-        async function stop() {
-            await fetch(
-                '/stop',
-                {
-                    'method': 'POST',
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(null)
-                }
-            );
-        }
-        ")
-        .with_title("AutoRec")
-        .with_header(1, "AutoRec")
-        .with_container(
-            Container::new(ContainerType::Article)
-                .with_attributes([("id", "article1")])
-                .with_header(2, "Recorded Songs")
-                .with_link_attr("#", "(Stop playback)", [("onclick", format!("stop()").as_str())])
-                .with_container(songs_html),
-        );
-
-    axum::response::Html(page.to_html_string())
+    Ok(axum::response::Html(output))
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct PlayRequest {

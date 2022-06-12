@@ -1,0 +1,58 @@
+<!doctype HTML>
+<html>
+    <head>
+        <title>AutoRec</title>
+        <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@latest/css/pico.min.css">
+        <script>
+            async function play(song) {
+                await fetch(
+                    '/play',
+                    {
+                        'method': 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({'name': song})
+                    }
+                );
+            }
+
+            async function stop() {
+                await fetch(
+                    '/stop',
+                    {
+                        'method': 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(null)
+                    }
+                );
+            }
+        </script>
+    </head>
+
+    <body>
+        <article>
+        <header>
+            <h1>AutoRec</h1>
+            <button onclick="stop()" data-tooltip="T&auml;st">Stop playback</button>
+        </header>
+        <main>
+            <h2>Recorded songs</h2>
+            {% assign last_date = "" %}
+            {% for song in songs %}
+            {% assign this_date = song | slice: 0, 8 %}
+            {% if this_date <> last_date and forloop.first == false %}
+                <hr>
+                {% assign last_date = this_date %}
+            {% endif %}
+            <button onclick="play(this.dataset.song)" data-song="{{song | escape}}">{{song | escape}}</button>
+            {% endfor %}
+        </main>
+        </article>
+    </body>
+
+</html>

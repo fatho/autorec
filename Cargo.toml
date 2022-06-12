@@ -7,11 +7,11 @@ edition = "2021"
 [dependencies]
 alsa = "0.6.0"
 axum = "0.5.5"
-build_html = "2.1.0"
 chrono = { version = "0.4.19", default-features = false, features = ["std", "clock"] }
 clap = { version = "3.1.18", features = ["derive"] }
 color-eyre = "0.6.1"
 futures-util = "0.3.21"
+liquid = "0.26.0"
 midly = "0.5.2"
 nix = "0.24.1"
 serde = { version = "1.0.137", features = ["derive"] }
