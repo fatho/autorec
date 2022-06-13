@@ -44,12 +44,12 @@
             <h2>Recorded songs</h2>
             {% assign last_date = "" %}
             {% for song in songs %}
-            {% assign this_date = song | slice: 0, 8 %}
-            {% if this_date <> last_date and forloop.first == false %}
-                <hr>
-                {% assign last_date = this_date %}
-            {% endif %}
-            <button onclick="play(this.dataset.song)" data-song="{{song | escape}}">{{song | escape}}</button>
+                {% assign this_date = song | slice: 0, 8 %}
+                {% if this_date <> last_date %}
+                    <h3>{{this_date}}</h3>
+                    {% assign last_date = this_date %}
+                {% endif %}
+                <button onclick="play(this.dataset.song)" data-song="{{song | escape}}">{{song | escape}}</button>
             {% endfor %}
         </main>
         </article>
