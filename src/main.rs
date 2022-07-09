@@ -1,18 +1,20 @@
 use axum::{
-    http::{Method, StatusCode},
-    routing::{get, post, get_service},
-    Extension, Router, response::IntoResponse,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, get_service, post},
+    Extension, Router,
 };
 use clap::Parser;
 use color_eyre::Result;
-use state::AppState;
-use tower_http::services::ServeDir;
+use state::App;
 use std::net::SocketAddr;
 use tokio::task::JoinError;
+use tower_http::services::ServeDir;
 use tracing::{debug, error, info};
 
 mod args;
 mod midi;
+mod player;
 mod recorder;
 mod server;
 mod state;
@@ -25,14 +27,14 @@ async fn main() -> Result<()> {
     let args = args::Args::parse();
 
     // Initialize state
-    let proto_state_ref = AppState::new_shared(&args);
+    let proto_app_ref = App::new_shared(&args);
 
     // Set up midi context
     let midi = midi::Manager::new();
 
     let mut devices = midi.create_device_listener()?;
 
-    let state_ref = proto_state_ref.clone();
+    let app_ref = proto_app_ref.clone();
     let midi_device_thread = tokio::spawn(async move {
         info!("Started device handling");
         loop {
@@ -41,7 +43,7 @@ async fn main() -> Result<()> {
 
             match event {
                 midi::DeviceEvent::Connected { device, info } => {
-                    let mut state = state_ref.lock().unwrap();
+                    let mut state = app_ref.state_mut();
 
                     if info.client_name.contains(&args.midi_client) {
                         if let Some(dev) = state.connected_device.as_ref() {
@@ -51,19 +53,18 @@ async fn main() -> Result<()> {
                             state.connected_device = Some(device.clone());
                             match midi.create_recorder(&device) {
                                 Ok(rec) => {
-                                    let inner_state_ref = state_ref.clone();
+                                    let inner_app_ref = app_ref.clone();
                                     tokio::spawn(async move {
                                         info!("Beginning recording");
                                         if let Err(err) =
-                                            recorder::run_recorder(inner_state_ref.clone(), rec)
-                                                .await
+                                            recorder::run_recorder(inner_app_ref.clone(), rec).await
                                         {
                                             error!("Recorder failed: {}", err)
                                         } else {
                                             info!("Recorder shut down");
                                         }
                                         // reset recording state
-                                        let mut state = inner_state_ref.lock().unwrap();
+                                        let mut state = inner_app_ref.state_mut();
                                         state.connected_device = None;
                                     });
                                 }
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
                     state.devices.insert(device, info);
                 }
                 midi::DeviceEvent::Disconnected { device } => {
-                    let mut state = state_ref.lock().unwrap();
+                    let mut state = app_ref.state_mut();
                     state.devices.remove(&device);
                 }
             }
@@ -94,11 +95,10 @@ async fn main() -> Result<()> {
     let exit_signal = tokio::signal::ctrl_c();
 
     // Spawn a web server for remote interaction
-    let state_ref = proto_state_ref.clone();
+    let state_ref = proto_app_ref.clone();
     let web_thread = tokio::spawn(async move {
         let mut app = Router::new()
             .route("/devices", get(server::devices))
-            .route("/debug", get(server::debug))
             .route("/songs", get(server::songs))
             .route("/play", post(server::play))
             .route("/stop", post(server::stop))

@@ -1,25 +1,29 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    process::Stdio,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     args::Args,
     midi::{Device, DeviceInfo, MidiEvent, RecordEvent},
+    player::MidiPlayer,
 };
 
-pub type AppStateRef = Arc<Mutex<AppState>>;
+pub type AppRef = Arc<App>;
 
-#[derive(Default, Debug)]
+pub struct App {
+    state: RwLock<AppState>,
+    player: MidiPlayer,
+}
+
 pub struct AppState {
     pub devices: HashMap<Device, DeviceInfo>,
     pub connected_device: Option<Device>,
     pub song_dir: PathBuf,
-    pub player: Option<Player>,
+    pub last_song: Option<String>,
 }
 
 impl AppState {
@@ -28,12 +32,8 @@ impl AppState {
             devices: Default::default(),
             connected_device: None,
             song_dir: cfg.song_directory.clone(),
-            player: None,
+            last_song: None,
         }
-    }
-
-    pub fn new_shared(cfg: &Args) -> AppStateRef {
-        Arc::new(Mutex::new(AppState::new(cfg)))
     }
 
     pub fn query_songs(&self) -> std::io::Result<Vec<String>> {
@@ -110,32 +110,60 @@ impl AppState {
 
         smf.save(filepath)
     }
+}
 
-    pub fn play_song(&mut self, name: String) -> std::io::Result<()> {
-        // Stop current song first
-        if self.player.is_some() {
-            self.stop_song()?;
+impl App {
+    pub fn new(cfg: &Args) -> Self {
+        Self {
+            state: RwLock::new(AppState::new(cfg)),
+            player: MidiPlayer::new(),
         }
+    }
 
-        let mut filepath = self.song_dir.join(&name);
+    pub fn new_shared(cfg: &Args) -> AppRef {
+        Arc::new(App::new(cfg))
+    }
+
+    pub fn state(&self) -> impl std::ops::Deref<Target = AppState> + '_ {
+        self.state.read().unwrap()
+    }
+
+    pub fn state_mut(&self) -> impl std::ops::DerefMut<Target = AppState> + '_ {
+        self.state.write().unwrap()
+    }
+
+    pub fn query_songs(&self) -> std::io::Result<Vec<String>> {
+        self.state.read().unwrap().query_songs()
+    }
+
+    pub fn store_song(&self, name: &str, events: Vec<RecordEvent>) -> std::io::Result<()> {
+        self.state.write().unwrap().store_song(name, events)
+    }
+
+    pub async fn play_song(&self, name: String) -> std::io::Result<()> {
+        self.player.stop().await;
+
+        let (base_dir, device) = {
+            let state = self.state.read().unwrap();
+            (
+                state.song_dir.clone(),
+                state.connected_device.as_ref().map(|dev| dev.id()),
+            )
+        };
+
+        let mut filepath = base_dir.join(&name);
         filepath.set_extension("mid");
 
-        if let Some(dev) = self.connected_device.as_ref() {
+        if let Some(dev) = device {
             info!("Playing {}", filepath.display());
 
-            assert!(self.player.is_none());
+            let reader = tokio::fs::File::open(filepath).await?;
 
-            // hackedy hack
-            let player = std::process::Command::new("aplaymidi")
-                .arg("-p")
-                .arg(dev.id())
-                .arg(filepath)
-                .spawn()?;
-
-            self.player = Some(Player {
-                process: player,
-                song: name.clone(),
-            });
+            {
+                let mut state = self.state.write().unwrap();
+                state.last_song = Some(name);
+            }
+            self.player.play(dev, reader).await;
 
             Ok(())
         } else {
@@ -146,81 +174,15 @@ impl AppState {
         }
     }
 
-    pub fn stop_song(&mut self) -> std::io::Result<()> {
-        if let Some(mut previous_player) = self.player.take() {
-            if previous_player.process.try_wait()?.is_none() {
-                use nix::sys::signal;
-                use nix::unistd::Pid;
-                // still running, stop it
-                let _ = signal::kill(
-                    Pid::from_raw(previous_player.process.id() as i32),
-                    signal::SIGINT,
-                );
-                previous_player.process.wait()?;
-
-                // Reset output
-                if let Some(dev) = self.connected_device.as_ref() {
-                    let mut smf = midly::Smf::new(midly::Header::new(
-                        midly::Format::SingleTrack,
-                        midly::Timing::Metrical(midly::num::u15::new(96)),
-                    ));
-                    let mut track = Vec::new();
-                    track.push(midly::TrackEvent {
-                        delta: 0.into(),
-                        // `GM Reset` message
-                        kind: midly::TrackEventKind::SysEx(&[0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7]),
-                    });
-                    track.push(midly::TrackEvent {
-                        delta: 0.into(),
-                        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
-                    });
-                    smf.tracks.push(track);
-
-                    let mut reset_cmd = std::process::Command::new("aplaymidi")
-                        .arg("-p")
-                        .arg(dev.id())
-                        .arg("-")
-                        .stdin(Stdio::piped())
-                        .spawn()?;
-
-                    let mut stdin = reset_cmd.stdin.take().unwrap();
-                    if let Err(err) = smf.write_std(&mut stdin) {
-                        warn!("Could not reset MIDI: {err}");
-                    }
-                    drop(stdin);
-
-                    reset_cmd.wait()?;
-                }
-            }
-            Ok(())
-        } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Not currently playing",
-            ))
-        }
+    pub async fn stop_song(&self) {
+        self.player.stop().await
     }
 
-    pub fn poll_playing_song(&mut self) -> std::io::Result<Option<String>> {
-        if let Some(player) = self.player.as_mut() {
-            if player.process.try_wait()?.is_none() {
-                // Not exited yet
-                return Ok(Some(player.song.clone()));
-            } else {
-                // Exited
-                self.player = None;
-                Ok(None)
-            }
+    pub fn poll_playing_song(&self) -> Option<String> {
+        if self.player.is_playing() {
+            self.state.read().unwrap().last_song.clone()
         } else {
-            Ok(None)
+            None
         }
     }
-
-}
-
-
-#[derive(Debug)]
-pub struct Player {
-    process: std::process::Child,
-    song: String,
 }

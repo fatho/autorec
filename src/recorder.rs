@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use tracing::{info, trace, error};
 
-use crate::{midi::{self, RecordEvent}, state::AppStateRef};
+use crate::{midi::{self, RecordEvent}, state::AppRef};
 
 pub async fn run_recorder(
-    app_state: AppStateRef,
+    app: AppRef,
     mut recorder: midi::Recorder,
 ) -> color_eyre::Result<()> {
     loop {
@@ -14,10 +14,9 @@ pub async fn run_recorder(
 
         if let Some(event) = event {
             let song = record_song(event, &mut recorder).await?;
-            let mut state = app_state.lock().unwrap();
 
             let name = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-            if let Err(err) = state.store_song(&name, song) {
+            if let Err(err) = app.store_song(&name, song) {
                 error!("Failed to save song '{}': {}", name, err);
             } else {
                 info!("Recorded song '{}'", name);

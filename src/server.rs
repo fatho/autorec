@@ -2,7 +2,7 @@ use axum::{Extension, Json, response::IntoResponse, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::state::AppStateRef;
+use crate::state::AppRef;
 
 #[derive(Serialize, Deserialize)]
 pub struct DeviceObject {
@@ -12,10 +12,9 @@ pub struct DeviceObject {
 
 
 /// Return list of devices
-pub async fn devices(state_ref: Extension<AppStateRef>) -> Json<Vec<DeviceObject>> {
-    let state = state_ref.lock().unwrap();
-
-    let result = state
+pub async fn devices(app: Extension<AppRef>) -> Json<Vec<DeviceObject>> {
+    let result = app
+        .state()
         .devices
         .iter()
         .map(|(device, info)| DeviceObject {
@@ -27,18 +26,9 @@ pub async fn devices(state_ref: Extension<AppStateRef>) -> Json<Vec<DeviceObject
     Json(result)
 }
 
-/// Return debug-printed state
-pub async fn debug(state_ref: Extension<AppStateRef>) -> String {
-    let state = state_ref.lock().unwrap();
-
-    format!("{:#?}", state)
-}
-
-
 /// Return list songs
-pub async fn songs(state_ref: Extension<AppStateRef>) -> Json<Vec<String>> {
-    let state = state_ref.lock().unwrap();
-    let mut songs = state.query_songs().unwrap_or_else(|err| {
+pub async fn songs(app: Extension<AppRef>) -> Json<Vec<String>> {
+    let mut songs = app.query_songs().unwrap_or_else(|err| {
         error!("Failed to list songs: {}", err);
         vec![]
     });
@@ -64,30 +54,20 @@ impl IntoResponse for AppError {
     }
 }
 
-
-pub async fn play(state_ref: Extension<AppStateRef>, Json(request): Json<PlayRequest>) -> Result<Json<String>, AppError> {
-    let mut state = state_ref.lock().unwrap();
-
-    match state.play_song(request.name) {
+#[axum_macros::debug_handler]
+pub async fn play(app: Extension<AppRef>, Json(request): Json<PlayRequest>) -> Result<Json<String>, AppError> {
+    match app.play_song(request.name).await {
         Ok(()) => Ok(Json("ok".to_owned())),
         Err(err) => Err(AppError { message: err.to_string() }),
     }
 }
 
-pub async fn stop(state_ref: Extension<AppStateRef>, Json(()): Json<()>) -> Result<Json<String>, AppError> {
-    let mut state = state_ref.lock().unwrap();
-
-    match state.stop_song() {
-        Ok(()) => Ok(Json("ok".to_owned())),
-        Err(err) => Err(AppError { message: err.to_string() }),
-    }
+#[axum_macros::debug_handler]
+pub async fn stop(app: Extension<AppRef>, Json(()): Json<()>) -> Json<()> {
+    app.stop_song().await;
+    Json(())
 }
 
-pub async fn play_status(state_ref: Extension<AppStateRef>) -> Result<Json<Option<String>>, AppError> {
-    let mut state = state_ref.lock().unwrap();
-
-    match state.poll_playing_song() {
-        Ok(maybe_song) => Ok(Json(maybe_song)),
-        Err(err) => Err(AppError { message: err.to_string() }),
-    }
+pub async fn play_status(app: Extension<AppRef>) -> Json<Option<String>> {
+    Json(app.poll_playing_song())
 }
