@@ -77,7 +77,7 @@ impl MidiPlayer {
 
                             // Reset output
                             // TODO: log reset failures
-                            if let Ok(mut reset_cmd) = spawn_aplaymidi(output.as_str()).await {
+                            if let Ok(mut reset_cmd) = spawn_aplaymidi(output.as_str(), 0).await {
                                 let source = Box::pin(GM_RESET_MESSAGE_MID.as_slice());
                                 let stdin = reset_cmd.stdin.take().unwrap();
                                 feed_aplaymidi(stdin, source).await;
@@ -97,7 +97,7 @@ impl MidiPlayer {
                     Some(request) => match request {
                         Request::Play { source, output } => {
                             // Spawn a new process for the given play request
-                            let proc = spawn_aplaymidi(output.as_str()).await;
+                            let proc = spawn_aplaymidi(output.as_str(), 2).await;
 
                             match proc {
                                 Ok(mut proc) => {
@@ -157,10 +157,12 @@ impl MidiPlayer {
     }
 }
 
-async fn spawn_aplaymidi(output: &str) -> std::io::Result<tokio::process::Child> {
+async fn spawn_aplaymidi(output: &str, delay: u32) -> std::io::Result<tokio::process::Child> {
     tokio::process::Command::new("aplaymidi")
         .arg("-p")
         .arg(output)
+        .arg("-d")
+        .arg(delay.to_string())
         .arg("-") // read from stdin
         .stdin(Stdio::piped())
         .spawn()
