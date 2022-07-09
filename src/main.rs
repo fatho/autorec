@@ -1,11 +1,12 @@
 use axum::{
-    http::Method,
-    routing::{get, post},
-    Extension, Router,
+    http::{Method, StatusCode},
+    routing::{get, post, get_service},
+    Extension, Router, response::IntoResponse,
 };
 use clap::Parser;
 use color_eyre::Result;
 use state::AppState;
+use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
@@ -92,27 +93,26 @@ async fn main() -> Result<()> {
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
 
-    // CORS settings
-    let cors = tower_http::cors::CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST])
-        .allow_origin([
-            "http://localhost:3000".parse().unwrap(),
-            "http://127.0.0.1:3000".parse().unwrap(),
-        ])
-        .allow_headers([axum::http::header::CONTENT_TYPE]);
-
     // Spawn a web server for remote interaction
     let state_ref = proto_state_ref.clone();
     let web_thread = tokio::spawn(async move {
-        let app = Router::new()
+        let mut app = Router::new()
             .route("/devices", get(server::devices))
             .route("/debug", get(server::debug))
             .route("/songs", get(server::songs))
             .route("/play", post(server::play))
             .route("/stop", post(server::stop))
-            .route("/play-status", get(server::play_status))
-            .layer(cors)
-            .layer(Extension(state_ref));
+            .route("/play-status", get(server::play_status));
+
+        if let Some(dir) = args.serve_frontend.as_ref() {
+            async fn handle_error(_err: std::io::Error) -> impl IntoResponse {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.")
+            }
+
+            app = app.fallback(get_service(ServeDir::new(dir)).handle_error(handle_error));
+        }
+
+        app = app.layer(Extension(state_ref));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
         tracing::info!("Web server listening on http://{}", addr);

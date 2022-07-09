@@ -9,7 +9,12 @@ pub struct Args {
     /// Name of the MIDI client to attach to
     #[clap(short('c'), long)]
     pub midi_client: String,
+
     /// Path where recorded songs are stored.
     #[clap(short('d'), long)]
     pub song_directory: PathBuf,
+
+    /// Directory containing the frontend to serve
+    #[clap(short('f'), long)]
+    pub serve_frontend: Option<PathBuf>
 }
