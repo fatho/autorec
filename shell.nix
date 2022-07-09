@@ -22,6 +22,7 @@ in
 
       # NodeJS for frontend stuff
       nodejs
+      nodePackages.svgo
     ];
 
     buildInputs = with nixpkgs; [
