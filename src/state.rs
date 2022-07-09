@@ -1,10 +1,11 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
+    process::Stdio,
     sync::{Arc, Mutex},
 };
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     args::Args,
@@ -18,7 +19,7 @@ pub struct AppState {
     pub devices: HashMap<Device, DeviceInfo>,
     pub connected_device: Option<Device>,
     pub song_dir: PathBuf,
-    pub player: Option<std::process::Child>,
+    pub player: Option<Player>,
 }
 
 impl AppState {
@@ -39,7 +40,11 @@ impl AppState {
         let mut songs = Vec::new();
 
         for song in std::fs::read_dir(&self.song_dir)? {
-            if let Some(name) = song?.file_name().to_str().and_then(|name| name.strip_suffix(".mid")) {
+            if let Some(name) = song?
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_suffix(".mid"))
+            {
                 songs.push(name.to_owned())
             }
         }
@@ -107,22 +112,18 @@ impl AppState {
     }
 
     pub fn play_song(&mut self, name: String) -> std::io::Result<()> {
-        let mut filepath = self.song_dir.join(name);
+        // Stop current song first
+        if self.player.is_some() {
+            self.stop_song()?;
+        }
+
+        let mut filepath = self.song_dir.join(&name);
         filepath.set_extension("mid");
 
         if let Some(dev) = self.connected_device.as_ref() {
             info!("Playing {}", filepath.display());
 
-            if let Some(mut previous_player) = self.player.take() {
-                // TODO: should probably have a separate thread for `wait`ing.
-                if previous_player.try_wait()?.is_none() {
-                    use nix::unistd::Pid;
-                    use nix::sys::signal;
-                    // still running, stop it
-                    let _ = signal::kill(Pid::from_raw(previous_player.id() as i32), signal::SIGINT);
-                    previous_player.wait()?;
-                }
-            }
+            assert!(self.player.is_none());
 
             // hackedy hack
             let player = std::process::Command::new("aplaymidi")
@@ -131,30 +132,84 @@ impl AppState {
                 .arg(filepath)
                 .spawn()?;
 
-            self.player = Some(player);
+            self.player = Some(Player {
+                process: player,
+                song: name.clone(),
+            });
 
             Ok(())
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "No device for playing song"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No device for playing song",
+            ))
         }
     }
 
     pub fn stop_song(&mut self) -> std::io::Result<()> {
         if let Some(mut previous_player) = self.player.take() {
-            if previous_player.try_wait()?.is_none() {
-                use nix::unistd::Pid;
+            if previous_player.process.try_wait()?.is_none() {
                 use nix::sys::signal;
+                use nix::unistd::Pid;
                 // still running, stop it
-                let _ = signal::kill(Pid::from_raw(previous_player.id() as i32), signal::SIGINT);
-                previous_player.wait()?;
+                let _ = signal::kill(
+                    Pid::from_raw(previous_player.process.id() as i32),
+                    signal::SIGINT,
+                );
+                previous_player.process.wait()?;
+
+                // Reset output
+                if let Some(dev) = self.connected_device.as_ref() {
+                    let mut smf = midly::Smf::new(midly::Header::new(
+                        midly::Format::SingleTrack,
+                        midly::Timing::Metrical(midly::num::u15::new(96)),
+                    ));
+                    let mut track = Vec::new();
+                    track.push(midly::TrackEvent {
+                        delta: 0.into(),
+                        // `GM Reset` message
+                        kind: midly::TrackEventKind::SysEx(&[0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7]),
+                    });
+                    track.push(midly::TrackEvent {
+                        delta: 0.into(),
+                        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+                    });
+                    smf.tracks.push(track);
+
+                    let mut reset_cmd = std::process::Command::new("aplaymidi")
+                        .arg("-p")
+                        .arg(dev.id())
+                        .arg("-")
+                        .stdin(Stdio::piped())
+                        .spawn()?;
+
+                    let mut stdin = reset_cmd.stdin.take().unwrap();
+                    if let Err(err) = smf.write_std(&mut stdin) {
+                        warn!("Could not reset MIDI: {err}");
+                    }
+                    drop(stdin);
+
+                    reset_cmd.wait()?;
+                }
             }
             Ok(())
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Not currently playing"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Not currently playing",
+            ))
         }
     }
+
+    pub fn playing_song(&self) -> Option<String> {
+        self.player.as_ref().map(|p| p.song.clone())
+    }
+
 }
 
-pub struct RecorderState {
-    pub device: Device,
+
+#[derive(Debug)]
+pub struct Player {
+    process: std::process::Child,
+    song: String,
 }
