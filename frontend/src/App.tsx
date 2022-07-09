@@ -40,14 +40,15 @@ function App() {
 }
 
 function SongList() {
-  const [loading, setLoading] = useState(false);
+  const [songsLoading, setSongsLoading] = useState(false);
+  const [controlLoading, setControlLoading] = useState(null as null | string);
   const [songs, setSongs] = useState([]);
-  const [error, setError] = useState((null as null | string));
-  const [playing, setPlaying] = useState((null as null | string));
+  const [error, setError] = useState(null as null | string);
+  const [playing, setPlaying] = useState(null as null | string);
 
   const fetchSongs = async () => {
     try {
-      setLoading(true);
+      setSongsLoading(true);
       const response = await fetch("/songs");
       const data = await response.json();
       setSongs(data);
@@ -59,11 +60,11 @@ function SongList() {
         setError("Unknown error");
       }
     }
-    setLoading(false);
+    setSongsLoading(false);
   };
 
   const playSong = async (item: string) => {
-    setLoading(true);
+    setControlLoading(item);
     try {
       const response = await fetch("/play", {
         method: "POST",
@@ -86,11 +87,11 @@ function SongList() {
         setError("Unknown error");
       }
     }
-    setLoading(false);
+    setControlLoading(null);
   }
 
   const stopSong = async () => {
-    setLoading(true);
+    setControlLoading(playing);
     try {
       setPlaying(null);
 
@@ -114,7 +115,7 @@ function SongList() {
         setError("Unknown error");
       }
     }
-    setLoading(false);
+    setControlLoading(null);
   }
 
   const updatePlaying = async () => {
@@ -151,10 +152,14 @@ function SongList() {
             <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
           </ButtonGroup>
           <ButtonGroup className="me-2" aria-label="Second group">
-            <Button variant="secondary" onClick={stopSong}><StopFill /></Button>
+            {
+              controlLoading !== null
+                ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
+                : (<Button variant="secondary" disabled={playing === null} onClick={stopSong}><StopFill /></Button>)
+            }
           </ButtonGroup>
           {
-            loading
+            songsLoading
               ? (
                 <ButtonGroup className="me-2">
                   <Spinner animation="border" role="status">
@@ -183,12 +188,15 @@ function SongList() {
             songs.map(item => (
               <ListGroup.Item key={item}>
                 <Stack direction='horizontal'>
-                  <div>{item}</div>
+                  <div className="text-truncate">{item}</div>
                   <div className="ms-auto"></div>
                   {
-                    playing === item
-                      ? (<Button disabled={loading} onClick={stopSong}><StopFill /></Button>)
-                      : (<Button disabled={loading} onClick={() => playSong(item)}><PlayFill /></Button>)
+                    controlLoading === item
+                      ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
+                      :
+                        (playing === item
+                          ? (<Button disabled={controlLoading !== null} onClick={stopSong}><StopFill /></Button>)
+                          : (<Button disabled={controlLoading !== null} onClick={() => playSong(item)}><PlayFill /></Button>))
                   }
                 </Stack>
               </ListGroup.Item>
