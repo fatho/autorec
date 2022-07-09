@@ -48,7 +48,7 @@ function SongList() {
   const fetchSongs = async () => {
     try {
       setSongsLoading(true);
-      const response = await fetch("http://localhost:8000/songs");
+      const response = await fetch("/songs");
       const data = await response.json();
       setSongs(data);
       setError(null);
@@ -64,7 +64,7 @@ function SongList() {
 
   const playSong = async (item: string) => {
     try {
-      const response = await fetch("http://localhost:8000/play", {
+      const response = await fetch("/play", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -91,7 +91,7 @@ function SongList() {
     try {
       setPlaying(null);
 
-      const response = await fetch("http://localhost:8000/stop", {
+      const response = await fetch("/stop", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
