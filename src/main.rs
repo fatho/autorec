@@ -98,7 +98,8 @@ async fn main() -> Result<()> {
         .allow_origin([
             "http://localhost:3000".parse().unwrap(),
             "http://127.0.0.1:3000".parse().unwrap(),
-        ]);
+        ])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     // Spawn a web server for remote interaction
     let state_ref = proto_state_ref.clone();
