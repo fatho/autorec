@@ -117,58 +117,61 @@ function SongList() {
     fetchSongs();
   }, []);
 
-  if (songsLoading) {
-    return (
-      <Spinner animation="border" role="status">
-        <span className="visually-hidden">Loading...</span>
-      </Spinner>
-    );
-  } else {
-    return (
-      <Container className="border">
-        <Row>
-          <ButtonToolbar className="mt-2 mb-3" aria-label="Song control">
-            <ButtonGroup className="me-2" aria-label="First group">
-              <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
-            </ButtonGroup>
-            <ButtonGroup className="me-2" aria-label="Second group">
-              <Button variant="secondary" onClick={stopSong}><StopFill /></Button>
-            </ButtonGroup>
-          </ButtonToolbar>
-        </Row>
-        {
-          error
-            ? (
-              <Row>
-                <Alert key="error" variant="danger">
-                  {error}
-                </Alert>
-              </Row>
-            )
-            : null
-        }
-        <Row className="ms-0">
-          <ListGroup>
-            {
-              songs.map(item => (
-                <ListGroup.Item>
-                  <Stack direction='horizontal'>
-                    <div>{item}</div>
-                    <div className="ms-auto"></div>
-                    {
-                      playing === item
-                        ? (<Button onClick={stopSong}><StopFill /></Button>)
-                        : (<Button onClick={() => playSong(item)}><PlayFill /></Button>)
-                    }
-                  </Stack>
-                </ListGroup.Item>
-              ))
-            }
-          </ListGroup>
-        </Row>
-      </Container>
-    )
-  }
+  return (
+    <Container className="border">
+      <Row>
+        <ButtonToolbar className="mt-2 mb-3" aria-label="Song control">
+          <ButtonGroup className="me-2" aria-label="First group">
+            <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
+          </ButtonGroup>
+          <ButtonGroup className="me-2" aria-label="Second group">
+            <Button variant="secondary" onClick={stopSong}><StopFill /></Button>
+          </ButtonGroup>
+          {
+            songsLoading
+              ? (
+                <ButtonGroup className="me-2">
+                  <Spinner animation="border" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </Spinner>
+                </ButtonGroup>
+              )
+              : null
+          }
+        </ButtonToolbar>
+      </Row>
+      {
+        error
+          ? (
+            <Row>
+              <Alert key="error" variant="danger">
+                {error}
+              </Alert>
+            </Row>
+          )
+          : null
+      }
+      <Row className="ms-0">
+        <ListGroup>
+          {
+            songs.map(item => (
+              <ListGroup.Item key={item}>
+                <Stack direction='horizontal'>
+                  <div>{item}</div>
+                  <div className="ms-auto"></div>
+                  {
+                    playing === item
+                      ? (<Button onClick={stopSong}><StopFill /></Button>)
+                      : (<Button onClick={() => playSong(item)}><PlayFill /></Button>)
+                  }
+                </Stack>
+              </ListGroup.Item>
+            ))
+          }
+        </ListGroup>
+      </Row>
+    </Container>
+  )
 }
 
 export default App;
