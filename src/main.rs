@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
 
         app = app.layer(Extension(state_ref));
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
+        let addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
         tracing::info!("Web server listening on http://{}", addr);
         axum::Server::bind(&addr)
             .serve(app.into_make_service())

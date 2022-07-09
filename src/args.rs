@@ -14,6 +14,10 @@ pub struct Args {
     #[clap(short('d'), long)]
     pub song_directory: PathBuf,
 
+    /// Port for hosting the HTTP API.
+    #[clap(short('p'), long, default_value("8000"))]
+    pub http_port: u16,
+
     /// Directory containing the frontend to serve
     #[clap(short('f'), long)]
     pub serve_frontend: Option<PathBuf>
