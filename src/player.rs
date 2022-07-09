@@ -12,7 +12,7 @@ use std::{
 
 use lazy_static::lazy_static;
 use tokio::{select, sync::mpsc::Sender};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 pub struct MidiPlayer {
     is_playing: Arc<AtomicBool>,
@@ -63,10 +63,17 @@ impl MidiPlayer {
             loop {
                 let request = if let Some((_, process)) = running_process.as_mut() {
                     select! {
-                        _ = process.wait() => { continue; }
+                        _ = process.wait() => {
+                            info!("Playback finished");
+                            running_process = None;
+                            is_playing_supervisor.store(false, std::sync::atomic::Ordering::SeqCst);
+                            continue;
+                        }
                         req = receiver.recv() => {
                             let _ = process.kill().await; // TODO: log kill failure
                             let (output, _) = running_process.take().unwrap();
+
+                            info!("Playback cancelled");
 
                             // Reset output
                             // TODO: log reset failures

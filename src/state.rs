@@ -141,8 +141,6 @@ impl App {
     }
 
     pub async fn play_song(&self, name: String) -> std::io::Result<()> {
-        self.player.stop().await;
-
         let (base_dir, device) = {
             let state = self.state.read().unwrap();
             (
