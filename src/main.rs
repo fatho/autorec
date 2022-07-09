@@ -105,7 +105,6 @@ async fn main() -> Result<()> {
     let state_ref = proto_state_ref.clone();
     let web_thread = tokio::spawn(async move {
         let app = Router::new()
-            .route("/", get(server::startpage))
             .route("/devices", get(server::devices))
             .route("/debug", get(server::debug))
             .route("/songs", get(server::songs))
