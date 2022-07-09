@@ -40,14 +40,14 @@ function App() {
 }
 
 function SongList() {
-  const [songsLoading, setSongsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [songs, setSongs] = useState([]);
   const [error, setError] = useState((null as null | string));
   const [playing, setPlaying] = useState((null as null | string));
 
   const fetchSongs = async () => {
     try {
-      setSongsLoading(true);
+      setLoading(true);
       const response = await fetch("/songs");
       const data = await response.json();
       setSongs(data);
@@ -59,10 +59,11 @@ function SongList() {
         setError("Unknown error");
       }
     }
-    setSongsLoading(false);
+    setLoading(false);
   };
 
   const playSong = async (item: string) => {
+    setLoading(true);
     try {
       const response = await fetch("/play", {
         method: "POST",
@@ -85,9 +86,11 @@ function SongList() {
         setError("Unknown error");
       }
     }
+    setLoading(false);
   }
 
   const stopSong = async () => {
+    setLoading(true);
     try {
       setPlaying(null);
 
@@ -111,10 +114,33 @@ function SongList() {
         setError("Unknown error");
       }
     }
+    setLoading(false);
   }
+
+  const updatePlaying = async () => {
+    try {
+      const response = await fetch("/play-status");
+      const data = await response.json();
+      setPlaying(data);
+    } catch (e) {
+      if (e instanceof Error) {
+        console.log("Failed to poll playing status" + e.message);
+      } else {
+        console.log("Failed to poll playing status" + e);
+      }
+    }
+  };
 
   useEffect(() => {
     fetchSongs();
+  }, []);
+
+  useEffect(() => {
+    updatePlaying();
+    const timer = setInterval(updatePlaying, 2000);
+    return () => {
+      clearInterval(timer);
+    }
   }, []);
 
   return (
@@ -128,7 +154,7 @@ function SongList() {
             <Button variant="secondary" onClick={stopSong}><StopFill /></Button>
           </ButtonGroup>
           {
-            songsLoading
+            loading
               ? (
                 <ButtonGroup className="me-2">
                   <Spinner animation="border" role="status">
@@ -161,8 +187,8 @@ function SongList() {
                   <div className="ms-auto"></div>
                   {
                     playing === item
-                      ? (<Button onClick={stopSong}><StopFill /></Button>)
-                      : (<Button onClick={() => playSong(item)}><PlayFill /></Button>)
+                      ? (<Button disabled={loading} onClick={stopSong}><StopFill /></Button>)
+                      : (<Button disabled={loading} onClick={() => playSong(item)}><PlayFill /></Button>)
                   }
                 </Stack>
               </ListGroup.Item>

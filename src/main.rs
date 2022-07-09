@@ -111,6 +111,7 @@ async fn main() -> Result<()> {
             .route("/songs", get(server::songs))
             .route("/play", post(server::play))
             .route("/stop", post(server::stop))
+            .route("/play-status", get(server::play_status))
             .layer(cors)
             .layer(Extension(state_ref));
 

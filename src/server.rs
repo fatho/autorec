@@ -125,3 +125,12 @@ pub async fn stop(state_ref: Extension<AppStateRef>, Json(request): Json<()>) ->
         Err(err) => Err(AppError { message: err.to_string() }),
     }
 }
+
+pub async fn play_status(state_ref: Extension<AppStateRef>) -> Result<Json<Option<String>>, AppError> {
+    let mut state = state_ref.lock().unwrap();
+
+    match state.poll_playing_song() {
+        Ok(maybe_song) => Ok(Json(maybe_song)),
+        Err(err) => Err(AppError { message: err.to_string() }),
+    }
+}

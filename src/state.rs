@@ -201,8 +201,19 @@ impl AppState {
         }
     }
 
-    pub fn playing_song(&self) -> Option<String> {
-        self.player.as_ref().map(|p| p.song.clone())
+    pub fn poll_playing_song(&mut self) -> std::io::Result<Option<String>> {
+        if let Some(player) = self.player.as_mut() {
+            if player.process.try_wait()?.is_none() {
+                // Not exited yet
+                return Ok(Some(player.song.clone()));
+            } else {
+                // Exited
+                self.player = None;
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
 }
