@@ -132,9 +132,11 @@ impl AppState {
                 .spawn()?;
 
             self.player = Some(player);
-        }
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "No device for playing song"))
+        }
     }
 
     pub fn stop_song(&mut self) -> std::io::Result<()> {
@@ -148,7 +150,7 @@ impl AppState {
             }
             Ok(())
         } else {
-            Err(std::io::ErrorKind::NotFound.into())
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Not currently playing"))
         }
     }
 }
