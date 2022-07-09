@@ -19,6 +19,9 @@ in
 
       # Nix tools
       niv
+
+      # NodeJS for frontend stuff
+      nodejs
     ];
 
     buildInputs = with nixpkgs; [

@@ -36,6 +36,19 @@ pub async fn debug(state_ref: Extension<AppStateRef>) -> String {
     format!("{:#?}", state)
 }
 
+
+/// Return list songs
+pub async fn songs(state_ref: Extension<AppStateRef>) -> Json<Vec<String>> {
+    let state = state_ref.lock().unwrap();
+    let mut songs = state.query_songs().unwrap_or_else(|err| {
+        error!("Failed to list songs: {}", err);
+        vec![]
+    });
+    songs.sort_by(|a, b| b.cmp(a));
+
+    Json(songs)
+}
+
 macro_rules! template_source {
     ($name:expr) => {
         {
