@@ -1,11 +1,12 @@
 use axum::{
+    http::Method,
     routing::{get, post},
     Extension, Router,
 };
 use clap::Parser;
 use color_eyre::Result;
 use state::AppState;
-use std::{net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tracing::{debug, error, info};
 
@@ -14,7 +15,6 @@ mod midi;
 mod recorder;
 mod server;
 mod state;
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,7 +53,10 @@ async fn main() -> Result<()> {
                                     let inner_state_ref = state_ref.clone();
                                     tokio::spawn(async move {
                                         info!("Beginning recording");
-                                        if let Err(err) = recorder::run_recorder(inner_state_ref.clone(), rec).await {
+                                        if let Err(err) =
+                                            recorder::run_recorder(inner_state_ref.clone(), rec)
+                                                .await
+                                        {
                                             error!("Recorder failed: {}", err)
                                         } else {
                                             info!("Recorder shut down");
@@ -64,7 +67,11 @@ async fn main() -> Result<()> {
                                     });
                                 }
                                 Err(err) => {
-                                    error!("Failed to set up recorder for {}: {}", device.id(), err);
+                                    error!(
+                                        "Failed to set up recorder for {}: {}",
+                                        device.id(),
+                                        err
+                                    );
                                 }
                             }
                         }
@@ -85,6 +92,14 @@ async fn main() -> Result<()> {
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
 
+    // CORS settings
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST])
+        .allow_origin([
+            "http://localhost:3000".parse().unwrap(),
+            "http://127.0.0.1:3000".parse().unwrap(),
+        ]);
+
     // Spawn a web server for remote interaction
     let state_ref = proto_state_ref.clone();
     let web_thread = tokio::spawn(async move {
@@ -95,6 +110,7 @@ async fn main() -> Result<()> {
             .route("/songs", get(server::songs))
             .route("/play", post(server::play))
             .route("/stop", post(server::stop))
+            .layer(cors)
             .layer(Extension(state_ref));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
