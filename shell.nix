@@ -24,7 +24,6 @@ in
     buildInputs = with nixpkgs; [
       pkg-config
       alsa-lib
-      systemd
     ];
 
     # Always enable rust backtraces in development shell
