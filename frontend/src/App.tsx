@@ -146,64 +146,57 @@ function SongList() {
 
   return (
     <Container className="border">
-      <Row>
-        <ButtonToolbar className="mt-2 mb-3" aria-label="Song control">
-          <ButtonGroup className="me-2" aria-label="First group">
-            <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
-          </ButtonGroup>
-          <ButtonGroup className="me-2" aria-label="Second group">
-            {
-              controlLoading !== null
-                ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
-                : (<Button variant="secondary" disabled={playing === null} onClick={stopSong}><StopFill /></Button>)
-            }
-          </ButtonGroup>
+      <ButtonToolbar className="mt-2 mb-3" aria-label="Song control">
+        <ButtonGroup className="me-2" aria-label="First group">
           {
             songsLoading
               ? (
-                <ButtonGroup className="me-2">
-                  <Spinner animation="border" role="status">
-                    <span className="visually-hidden">Loading...</span>
-                  </Spinner>
-                </ButtonGroup>
+                <Button variant="secondary" disabled>
+                  <Spinner animation="border" role="status" size="sm" />
+                </Button>
               )
-              : null
+              : (
+                <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
+              )
           }
-        </ButtonToolbar>
-      </Row>
+        </ButtonGroup>
+        <ButtonGroup className="me-2" aria-label="Second group">
+          {
+            controlLoading !== null
+              ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
+              : (<Button variant="secondary" disabled={playing === null} onClick={stopSong}><StopFill /></Button>)
+          }
+        </ButtonGroup>
+      </ButtonToolbar>
       {
         error
           ? (
-            <Row>
-              <Alert key="error" variant="danger">
-                {error}
-              </Alert>
-            </Row>
+            <Alert key="error" variant="danger">
+              {error}
+            </Alert>
           )
           : null
       }
-      <Row className="ms-0">
-        <ListGroup>
-          {
-            songs.map(item => (
-              <ListGroup.Item key={item}>
-                <Stack direction='horizontal'>
-                  <div className="text-truncate">{item}</div>
-                  <div className="ms-auto"></div>
-                  {
-                    controlLoading === item
-                      ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
-                      :
-                        (playing === item
-                          ? (<Button disabled={controlLoading !== null} onClick={stopSong}><StopFill /></Button>)
-                          : (<Button disabled={controlLoading !== null} onClick={() => playSong(item)}><PlayFill /></Button>))
-                  }
-                </Stack>
-              </ListGroup.Item>
-            ))
-          }
-        </ListGroup>
-      </Row>
+      <ListGroup>
+        {
+          songs.map(item => (
+            <ListGroup.Item key={item}>
+              <Stack direction='horizontal'>
+                <div className="text-truncate">{item}</div>
+                <div className="ms-auto"></div>
+                {
+                  controlLoading === item
+                    ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
+                    :
+                    (playing === item
+                      ? (<Button disabled={controlLoading !== null} onClick={stopSong}><StopFill /></Button>)
+                      : (<Button disabled={controlLoading !== null} onClick={() => playSong(item)}><PlayFill /></Button>))
+                }
+              </Stack>
+            </ListGroup.Item>
+          ))
+        }
+      </ListGroup>
     </Container>
   )
 }
