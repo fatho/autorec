@@ -18,28 +18,57 @@ import Stack from 'react-bootstrap/esm/Stack';
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState } from './App/State';
-import { Modal } from 'react-bootstrap';
+import { Form, FormControl, Modal, Nav, NavDropdown, Offcanvas } from 'react-bootstrap';
 
 function App() {
   return (
     <div className="App">
-      <Navbar bg="light" variant="light">
-        <Container>
-          <Navbar.Brand href="#home">
-            <img
-              alt=""
-              src={logo}
-              width="30"
-              height="30"
-              className="d-inline-block align-top"
-            />{' '}
-            AutoRec
-          </Navbar.Brand>
-        </Container>
-      </Navbar>
       <AppContextProvider>
+        <Navbar expand={false} bg="light" variant="light" sticky="top" className="border">
+          <Container>
+            <Navbar.Toggle aria-controls="nav-offcanvasNavbar" />
+            <Navbar.Brand href="#home">
+              <img
+                alt=""
+                src={logo}
+                width="30"
+                height="30"
+                className="d-inline-block align-top"
+              />{' '}
+              AutoRec
+            </Navbar.Brand>
+            <Navbar.Offcanvas
+              id="nav-offcanvasNavbar"
+              aria-labelledby="nav-offcanvasNavbarLabel"
+              placement="start"
+            >
+              <Offcanvas.Header closeButton>
+                <Offcanvas.Title id="nav-offcanvasNavbarLabel">
+                  <img
+                    alt=""
+                    src={logo}
+                    width="30"
+                    height="30"
+                    className="d-inline-block align-top"
+                  />{' '}
+                  Menu
+                </Offcanvas.Title>
+              </Offcanvas.Header>
+              <Offcanvas.Body>
+                <Nav>
+                  <Nav.Item>
+                    <Nav.Link href="#bydate">Recordings by Date</Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item>
+                    <Nav.Link href="#about">About</Nav.Link>
+                  </Nav.Item>
+                </Nav>
+              </Offcanvas.Body>
+            </Navbar.Offcanvas>
+            <Toolbar className="ms-2 ms-sm-0 my-2" />
+          </Container>
+        </Navbar>
         <Container className="px-0 px-sm-2">
-          <Toolbar className="ms-2 ms-sm-0 my-2" />
           <ErrorBanner />
           <RecordingsList />
         </Container>
@@ -119,7 +148,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
       case PlayingState.Pending:
         return (<Button variant="outline-primary" disabled><Spinner size="sm" animation="border" /></Button>)
       case PlayingState.Playing:
-        return (<Button variant="outline-primary" onClick={props.onStop}><StopFill /></Button>)
+        return (<Button variant="primary" onClick={props.onStop}><StopFill /></Button>)
       case PlayingState.Stopped:
         return (<Button variant="outline-primary" onClick={props.onPlay}><PlayFill /></Button>)
     }
@@ -152,7 +181,7 @@ function ErrorBanner() {
 
 
 
-function Toolbar({className}: {className: string}) {
+function Toolbar({ className }: { className: string }) {
   const { state, actions, dispatch } = useAppContext();
 
   return (
@@ -170,11 +199,14 @@ function Toolbar({className}: {className: string}) {
             )
         }
       </ButtonGroup>
-      <ButtonGroup className="me-2" aria-label="Second group">
+      <ButtonGroup className="me-1" aria-label="Second group">
         {
           state.playingState === PlayingState.Pending
             ? (<Button variant="outline-primary" disabled><Spinner animation="border" size="sm" /></Button>)
-            : (<Button variant="outline-primary" disabled={state.playingState === PlayingState.Stopped} onClick={() => actions.stopPlaying(dispatch)}><StopFill /></Button>)
+            : (<Button
+                variant={state.playingState === PlayingState.Stopped ? "secondary" : "outline-primary" }
+                disabled={state.playingState === PlayingState.Stopped}
+                onClick={() => actions.stopPlaying(dispatch)}><StopFill /></Button>)
         }
       </ButtonGroup>
     </ButtonToolbar>
