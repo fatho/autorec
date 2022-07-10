@@ -1,4 +1,4 @@
-Goals:
+Pimary Goals:
     ✔ Monitor MIDI devices @done(22-05-21 13:41)
     Automatic recording:
         ✔ Start recorder when device is attached @started(22-05-21 13:41) @done(22-05-21 15:31) @lasted(1h50m16s)
@@ -10,11 +10,23 @@ Goals:
     Web UI:
         ✔ View current state @done(22-07-09 21:31)
         ✔ Live-update of view (maybe a SPA with websocket updates) @done(22-07-09 21:31)
-        ☐ Use websocket for live-updates
+        ✔ Use SSE for live-updates @done(22-07-10 20:13)
     Playback:
         ✔ Implement ALSA playback @done(22-07-09 21:31)
         ✔ Play previously recorded MIDI files via Web-UI @done(22-07-09 21:31)
     Convenience:
-        ☐ Add proper config file format
+        ✔ Add proper config file format @done(22-07-10 20:13)
+
+Features:
+    Management:
+        ☐ Use SQLite database
+        ☐ Store metadata (such as created timestamp, song name, rating)
+        ☐ Browse recordings by different dimensions (not just a single list)
+        ☐ Find a way to deal with a lot of recordings (loading everything into the webpage won't scale)
+    
+    Nice-to-haves:
+        ☐ Auto-detect name based on matching with previous recordings
+
+    Piano Interface:
         ☐ Add special "chord" for immediately starting new song (e.g. pressing two lowest keys)
         ☐ Play short tunes for notifications (e.g. "recording up and running" or "song finished")
