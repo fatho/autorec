@@ -88,7 +88,9 @@ pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<String>> {
 pub enum UpdateEvent {
     RecordBegin,
     RecordEnd { recording: String },
+    RecordError { message: String },
     PlayBegin { recording: String },
+    PlayError { message: String },
     PlayEnd,
 }
 
@@ -101,10 +103,12 @@ impl UpdateEvent {
             StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd {
                 recording: recording.0,
             }),
+            StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
                 recording: recording.0,
             }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
+            StateChange::PlayError { message } => Some(UpdateEvent::PlayError { message }),
         }
     }
 }

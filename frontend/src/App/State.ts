@@ -5,6 +5,7 @@ enum ActionType {
 
     RecordBegin,
     RecordEnd,
+    RecordError,
 
     PlayControlPending,
     PlayStateUpdated,
@@ -168,6 +169,13 @@ function reducer(state: AppState, action: Action): AppState {
                 ...state,
                 recordings: [action.recording!, ...state.recordings],
                 isRecording: false,
+            }
+        case ActionType.RecordError:
+            return {
+                ...state,
+                isRecording: false,
+                error: true,
+                errorMessage: action.errorMessage!,
             }
         
         case ActionType.PlayStateUpdated:

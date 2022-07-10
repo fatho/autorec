@@ -162,11 +162,11 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                 let name = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
                 if let Err(err) = store_recording(&app, &name, events) {
                     error!("Failed to save song '{}': {}", name, err);
+                    app.notify(StateChange::RecordError { message: err.to_string() });
                 } else {
                     info!("Recorded song '{}'", name);
+                    app.notify(StateChange::RecordEnd { recording: RecordingId(name) });
                 }
-                // TODO: notify aout error
-                app.notify(StateChange::RecordEnd { recording: RecordingId(name) });
             }
             AppEvent::PlayerStart { recording } => {
                 let playback_device = {
@@ -189,8 +189,10 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                         state.player = Some(player);
                         state.player_current = Some(recording);
                     },
-                    // TODO: notify client about error somehow
-                    Err(err) => error!("Failed to play recording {}: {}", recording.0, err),
+                    Err(err) => {
+                        app.notify(StateChange::PlayError { message: err.to_string() });
+                        error!("Failed to play recording {}: {}", recording.0, err)
+                    },
                 }
             }
             AppEvent::PlayerRequestStop => {
@@ -214,8 +216,10 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                             state.player = Some(player);
                             state.player_current = Some(queued);
                         },
-                        // TODO: notify client about error somehow
-                        Err(err) => error!("Failed to play recording {}: {}", queued.0, err),
+                        Err(err) => {
+                            app.notify(StateChange::PlayError { message: err.to_string() });
+                            error!("Failed to play recording {}: {}", queued.0, err)
+                        },
                     }
                 } else {
                     let mut state = app.state.write().unwrap();
@@ -403,8 +407,12 @@ pub enum StateChange {
     RecordBegin,
     /// App stops recording (due to MIDI inactivity)
     RecordEnd { recording: RecordingId },
+    /// Failed to record song
+    RecordError { message: String },
     /// App starts playing back
     PlayBegin { recording: RecordingId },
+    /// Failed to start playback
+    PlayError { message: String },
     /// App stops playing back
     PlayEnd,
 }

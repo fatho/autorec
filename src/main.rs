@@ -16,7 +16,6 @@ use tower_http::{
 use tracing::{error, info};
 
 mod app;
-mod args;
 mod config;
 mod midi;
 mod player;

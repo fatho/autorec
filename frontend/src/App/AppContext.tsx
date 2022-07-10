@@ -23,8 +23,6 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                 eventSourceRef.current.close();
             }
             const source = new EventSource("/updates-sse");
-            State.actions.queryRecordings(dispatch);
-            State.actions.queryPlayState(dispatch);
 
             eventSourceRef.current = source;
 
@@ -51,6 +49,12 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                                 playing: null,
                             });
                             break;
+                        case "PlayError":
+                            dispatch({
+                                type: State.ActionType.PlayStateFailed,
+                                errorMessage: data.message,
+                            });
+                            break;
                         case "RecordBegin":
                             dispatch({
                                 type: State.ActionType.RecordBegin,
@@ -62,6 +66,12 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                                 recording: data.recording,
                             });
                             break;
+                        case "RecordError":
+                            dispatch({
+                                type: State.ActionType.RecordError,
+                                errorMessage: data.message,
+                            });
+                            break;
                     }
                     console.log(data);
                 } catch (ex) {
@@ -71,6 +81,8 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
         }
 
         connectEventSource();
+        State.actions.queryRecordings(dispatch);
+        State.actions.queryPlayState(dispatch);
 
         return () => {
             if(eventSourceRef.current) {

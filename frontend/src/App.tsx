@@ -57,7 +57,7 @@ function App() {
             <Toolbar className="ms-2 ms-sm-0 my-2" />
           </Container>
         </Navbar>
-        <Container className="px-0 px-sm-2">
+        <Container className="mt-2 px-0 px-sm-2">
           <ErrorBanner />
           <RecordingsList />
         </Container>
@@ -225,7 +225,10 @@ function Toolbar({ className }: { className: string }) {
               </Button>
             )
             : (
-              <Button variant="outline-primary" onClick={() => actions.queryRecordings(dispatch)}><ArrowClockwise /></Button>
+              <Button variant="outline-primary" onClick={() => {
+                actions.queryRecordings(dispatch);
+                actions.queryPlayState(dispatch);
+              }}><ArrowClockwise /></Button>
             )
         }
       </ButtonGroup>
