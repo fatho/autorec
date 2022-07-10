@@ -90,6 +90,38 @@ function RecordingsList() {
     setShowConfirmDelete(true);
   }
 
+  // TEMP: until the backend provides more metadata, just group based on the naming scheme
+  const groups = [];
+  const otherGroup = [] as string[];
+
+  var currentGroup = null as string | null;
+  var currentGroupItems = [];
+  state.recordings.forEach((item) => {
+    const split = item.indexOf("-");
+    if(split > 0) {
+      const group = item.substring(0, split);
+      if(currentGroup === group) {
+        currentGroupItems.push(item);
+      } else {
+        currentGroup = group;
+        currentGroupItems = [item];
+        groups.push({
+          title: currentGroup,
+          items: currentGroupItems,
+        });
+      }
+    } else {
+      otherGroup.push(item);
+    }
+  });
+
+  if(otherGroup.length > 0) {
+    groups.push({
+      title: "Other",
+      items: otherGroup,
+    });
+  }
+
   return (
     <>
       <Modal show={showConfirmDelete} onHide={handleClose}>
@@ -107,30 +139,39 @@ function RecordingsList() {
         </Modal.Footer>
       </Modal>
 
-      <ListGroup>
+      <Stack>
         {state.isRecording
           ? (
-            <ListGroup.Item key="recording">
-              <Stack direction='horizontal'>
-                <Spinner animation='grow' variant="danger" />
-                <div className="ms-2">Recording in progress</div>
-              </Stack>
-            </ListGroup.Item>
+            <ListGroup>
+              <ListGroup.Item key="recording">
+                <Stack direction='horizontal'>
+                  <Spinner animation='grow' variant="danger" />
+                  <div className="ms-2">Recording in progress</div>
+                </Stack>
+              </ListGroup.Item>
+            </ListGroup>
           )
           : <></>}
-        {state.recordings.map(item => (
-          <ListGroup.Item key={item}>
-            <RecordingItem
-              recording={item}
-              playingState={state.playingState === PlayingState.Pending && state.playingQueued === item
-                ? PlayingState.Pending
-                : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)}
-              onPlay={() => actions.playRecording(dispatch, item)}
-              onStop={() => actions.stopPlaying(dispatch)}
-              onRequestDelete={() => confirmDelete(item)} />
-          </ListGroup.Item>
+        {groups.map(group => (
+          <ListGroup key={group.title} className="mt-2">
+            <ListGroup.Item key="title">
+              <b>{group.title}</b>
+            </ListGroup.Item>
+            {group.items.map(item => (
+            <ListGroup.Item key={item}>
+              <RecordingItem
+                recording={item}
+                playingState={state.playingState === PlayingState.Pending && state.playingQueued === item
+                  ? PlayingState.Pending
+                  : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)}
+                onPlay={() => actions.playRecording(dispatch, item)}
+                onStop={() => actions.stopPlaying(dispatch)}
+                onRequestDelete={() => confirmDelete(item)} />
+            </ListGroup.Item>
+          ))}
+          </ListGroup>
         ))}
-      </ListGroup></>
+      </Stack></>
   )
 }
 
@@ -158,7 +199,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
       <div className="text-truncate">{props.recording}</div>
       {
         props.playingState == PlayingState.Playing
-          ? <VolumeUp size="1.5em" />
+          ? <VolumeUp className="ms-2" size="1.5em" color="gray" />
           : <></>
       }
       <div className="ms-auto"></div>
