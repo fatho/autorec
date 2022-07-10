@@ -1,13 +1,3 @@
-import React from "react";
-
-class AutoRecClient {
-    constructor() {
-    }
-
-    async play_recording(recording: string) {
-    }
-}
-
 enum ActionType {
     QueryRecordingsPending,
     QueryRecordingsFailed,
@@ -68,9 +58,6 @@ const initialState: AppState = {
 type ActionDispatch = (a: Action) => void;
 
 class StatusError extends Error {
-    constructor(msg: string) {
-        super(msg);
-    }
 }
 
 async function checkForStatus(response: Response) {

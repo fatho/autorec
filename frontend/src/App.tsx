@@ -1,24 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 
 // Icons
 import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash } from 'react-bootstrap-icons';
 
-import Button from 'react-bootstrap/Button';
-import Alert from 'react-bootstrap/esm/Alert';
-import Spinner from 'react-bootstrap/esm/Spinner';
-import ButtonToolbar from 'react-bootstrap/esm/ButtonToolbar';
-import ButtonGroup from 'react-bootstrap/esm/ButtonGroup';
-import Navbar from 'react-bootstrap/esm/Navbar';
-import Container from 'react-bootstrap/esm/Container';
-import Row from 'react-bootstrap/esm/Row';
-import ListGroup from 'react-bootstrap/esm/ListGroup';
-import Stack from 'react-bootstrap/esm/Stack';
-
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState } from './App/State';
-import { Form, FormControl, Modal, Nav, NavDropdown, Offcanvas } from 'react-bootstrap';
+import { Button, Alert, Spinner, ButtonToolbar, ButtonGroup, Navbar, Container, ListGroup, Stack, Modal, Nav, Offcanvas } from 'react-bootstrap';
 
 function App() {
   return (
@@ -198,7 +187,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
     <Stack direction='horizontal'>
       <div className="text-truncate">{props.recording}</div>
       {
-        props.playingState == PlayingState.Playing
+        props.playingState === PlayingState.Playing
           ? <VolumeUp className="ms-2" size="1.5em" color="gray" />
           : <></>
       }
