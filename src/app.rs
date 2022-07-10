@@ -1,19 +1,18 @@
-use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, RwLock};
 
 use crate::{
     config::AppConfig,
-    midi::{self, Device, DeviceInfo, RecordEvent, MidiEvent}, recorder, player2,
+    midi::{self, Device, DeviceInfo, RecordEvent, MidiEvent}, recorder, player,
 };
 
-use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, error};
+use tracing::{info, error};
 
 pub struct State {
     listening_device: Option<Device>,
     player_current: Option<RecordingId>,
     player_queued: Option<RecordingId>,
-    player: Option<player2::MidiPlayer>,
+    player: Option<player::MidiPlayer>,
 }
 
 pub struct App {
@@ -147,10 +146,10 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
             AppEvent::DeviceConnected { device, info } => {
                 handle_new_device(&app, device, info);
             }
-            AppEvent::DeviceDisconnected { device } => {
+            AppEvent::DeviceDisconnected { .. } => {
                 // Not particularly interesting for now
             }
-            AppEvent::RecorderShutDown { device } => {
+            AppEvent::RecorderShutDown { .. } => {
                 let mut state = app.state.write().unwrap();
                 state.listening_device = None;
                 app.notify(StateChange::ListenEnd);
@@ -229,13 +228,13 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
     }
 }
 
-async fn play_recording(app: &Arc<App>, device: Option<String>, recording: RecordingId) -> std::io::Result<player2::MidiPlayer> {
+async fn play_recording(app: &Arc<App>, device: Option<String>, recording: RecordingId) -> std::io::Result<player::MidiPlayer> {
     if let Some(output) = device {
         info!("Playing {}", recording.0);
 
         let reader = open_recording(app, &recording).await?;
 
-        let (player, notifier) = player2::MidiPlayer::new(output, Box::pin(reader)).await?;
+        let (player, notifier) = player::MidiPlayer::new(output, Box::pin(reader)).await?;
         tokio::spawn({
             let app = app.clone();
             async move {

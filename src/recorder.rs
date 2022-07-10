@@ -1,6 +1,6 @@
 use std::{time::Duration, sync::Arc};
 
-use tracing::{info, trace, error};
+use tracing::{info, trace};
 
 use crate::{midi::{self, RecordEvent}, app::App};
 

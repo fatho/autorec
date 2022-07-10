@@ -1,11 +1,17 @@
-use std::{sync::Arc, time::Duration, convert::Infallible};
+use std::{convert::Infallible, sync::Arc};
 
-use axum::{Extension, Json, response::{IntoResponse, Sse, sse::{Event, KeepAlive}}, http::{StatusCode, HeaderValue}, extract::{WebSocketUpgrade, ws::{WebSocket, Message}}};
-use futures_util::{Stream, stream};
+use axum::{
+    http::{HeaderValue, StatusCode},
+    response::{
+        sse::{Event, KeepAlive},
+        IntoResponse, Sse,
+    },
+    Extension, Json,
+};
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
-use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::error;
 
 use crate::app::{App, RecordingId, StateChange};
 
@@ -14,7 +20,6 @@ pub struct DeviceObject {
     id: String,
     description: String,
 }
-
 
 // TODO: reinstate /devices endpoint
 // /// Return list of devices
@@ -48,7 +53,6 @@ pub struct PlayRequest {
     name: String,
 }
 
-
 #[derive(Serialize, Deserialize)]
 pub struct AppError {
     message: String,
@@ -61,7 +65,10 @@ impl IntoResponse for AppError {
 }
 
 #[axum_macros::debug_handler]
-pub async fn play(app: Extension<Arc<App>>, Json(request): Json<PlayRequest>) -> Result<Json<()>, AppError> {
+pub async fn play(
+    app: Extension<Arc<App>>,
+    Json(request): Json<PlayRequest>,
+) -> Result<Json<()>, AppError> {
     app.play_recording(RecordingId(request.name)).await;
     Ok(Json(()))
 }
@@ -82,7 +89,7 @@ pub enum UpdateEvent {
     RecordBegin,
     RecordEnd { recording: String },
     PlayBegin { recording: String },
-    PlayEnd
+    PlayEnd,
 }
 
 impl UpdateEvent {
@@ -91,16 +98,18 @@ impl UpdateEvent {
             StateChange::ListenBegin { device, info } => None,
             StateChange::ListenEnd => None,
             StateChange::RecordBegin => Some(UpdateEvent::RecordBegin),
-            StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd { recording: recording.0 }),
-            StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin { recording: recording.0 }),
+            StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd {
+                recording: recording.0,
+            }),
+            StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
+                recording: recording.0,
+            }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
         }
     }
 }
 
-pub async fn updates_sse(
-    app: Extension<Arc<App>>,
-) -> impl IntoResponse {
+pub async fn updates_sse(app: Extension<Arc<App>>) -> impl IntoResponse {
     let mut events = app.subscribe();
 
     let source = async_stream::stream! {
@@ -121,53 +130,12 @@ pub async fn updates_sse(
     };
     let stream = source.map(Result::<_, Infallible>::Ok);
 
-    let mut response = Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
-    response.headers_mut().insert("Cache-Control", HeaderValue::from_static("no-cache, no-store, no-transform, must-revalidate"));
+    let mut response = Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response();
+    response.headers_mut().insert(
+        "Cache-Control",
+        HeaderValue::from_static("no-cache, no-store, no-transform, must-revalidate"),
+    );
     response
-}
-
-pub async fn updates_ws(
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
-}
-
-async fn handle_socket(mut socket: WebSocket) {
-    // if let Some(msg) = socket.recv().await {
-    //     if let Ok(msg) = msg {
-    //         match msg {
-    //             Message::Text(t) => {
-    //                 println!("client sent str: {:?}", t);
-    //             }
-    //             Message::Binary(_) => {
-    //                 println!("client sent binary data");
-    //             }
-    //             Message::Ping(_) => {
-    //                 println!("socket ping");
-    //             }
-    //             Message::Pong(_) => {
-    //                 println!("socket pong");
-    //             }
-    //             Message::Close(_) => {
-    //                 println!("client disconnected");
-    //                 return;
-    //             }
-    //         }
-    //     } else {
-    //         println!("client disconnected");
-    //         return;
-    //     }
-    // }
-
-    loop {
-        if socket
-            .send(Message::Text(String::from("Hi!")))
-            .await
-            .is_err()
-        {
-            println!("client disconnected");
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    }
 }

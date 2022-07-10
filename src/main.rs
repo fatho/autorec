@@ -13,17 +13,15 @@ use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
 };
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 mod app;
 mod args;
 mod config;
 mod midi;
 mod player;
-mod player2;
 mod recorder;
 mod server;
-mod state;
 
 /// Program to automatically start MIDI recordings of songs played on an attached MIDI device.
 #[derive(Parser, Debug)]
@@ -59,7 +57,6 @@ async fn main() -> Result<()> {
                 .route("/play", post(server::play))
                 .route("/stop", post(server::stop))
                 .route("/play-status", get(server::play_status))
-                .route("/updates", get(server::updates_ws))
                 .route("/updates-sse", get(server::updates_sse));
 
             if let Some(dir) = config.web.serve_frontend.as_ref() {
