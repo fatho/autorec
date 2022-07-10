@@ -1,0 +1,7 @@
+[app]
+data_directory = "recordings"
+midi_device = "Net Client"
+
+[web]
+port = 8000
+# serve_frontend = "frontend/build"

@@ -27,7 +27,7 @@ impl From<alsa::seq::Addr> for Device {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub client_name: String,
     pub port_name: String,

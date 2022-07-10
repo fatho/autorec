@@ -10,6 +10,7 @@ Goals:
     Web UI:
         ✔ View current state @done(22-07-09 21:31)
         ✔ Live-update of view (maybe a SPA with websocket updates) @done(22-07-09 21:31)
+        ☐ Use websocket for live-updates
     Playback:
         ✔ Implement ALSA playback @done(22-07-09 21:31)
         ✔ Play previously recorded MIDI files via Web-UI @done(22-07-09 21:31)

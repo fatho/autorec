@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use axum::{Extension, Json, response::IntoResponse, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::state::AppRef;
+use crate::app::{App, RecordingId};
 
 #[derive(Serialize, Deserialize)]
 pub struct DeviceObject {
@@ -11,23 +13,24 @@ pub struct DeviceObject {
 }
 
 
-/// Return list of devices
-pub async fn devices(app: Extension<AppRef>) -> Json<Vec<DeviceObject>> {
-    let result = app
-        .state()
-        .devices
-        .iter()
-        .map(|(device, info)| DeviceObject {
-            id: device.id(),
-            description: format!("{} ({})", info.client_name, info.port_name),
-        })
-        .collect();
+// TODO: reinstate /devices endpoint
+// /// Return list of devices
+// pub async fn devices(app: Extension<Arc<App>>) -> Json<Vec<DeviceObject>> {
+//     let result = app
+//         .state()
+//         .devices
+//         .iter()
+//         .map(|(device, info)| DeviceObject {
+//             id: device.id(),
+//             description: format!("{} ({})", info.client_name, info.port_name),
+//         })
+//         .collect();
 
-    Json(result)
-}
+//     Json(result)
+// }
 
 /// Return list songs
-pub async fn songs(app: Extension<AppRef>) -> Json<Vec<String>> {
+pub async fn songs(app: Extension<Arc<App>>) -> Json<Vec<String>> {
     let mut songs = app.query_songs().unwrap_or_else(|err| {
         error!("Failed to list songs: {}", err);
         vec![]
@@ -55,19 +58,17 @@ impl IntoResponse for AppError {
 }
 
 #[axum_macros::debug_handler]
-pub async fn play(app: Extension<AppRef>, Json(request): Json<PlayRequest>) -> Result<Json<String>, AppError> {
-    match app.play_song(request.name).await {
-        Ok(()) => Ok(Json("ok".to_owned())),
-        Err(err) => Err(AppError { message: err.to_string() }),
-    }
+pub async fn play(app: Extension<Arc<App>>, Json(request): Json<PlayRequest>) -> Result<Json<()>, AppError> {
+    app.play_recording(RecordingId(request.name)).await;
+    Ok(Json(()))
 }
 
 #[axum_macros::debug_handler]
-pub async fn stop(app: Extension<AppRef>, Json(()): Json<()>) -> Json<()> {
-    app.stop_song().await;
+pub async fn stop(app: Extension<Arc<App>>, Json(()): Json<()>) -> Json<()> {
+    app.stop_playing().await;
     Json(())
 }
 
-pub async fn play_status(app: Extension<AppRef>) -> Json<Option<String>> {
-    Json(app.poll_playing_song())
+pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<String>> {
+    Json(app.playing_recording().map(|rec| rec.0))
 }

@@ -5,122 +5,76 @@ use axum::{
     Extension, Router,
 };
 use clap::Parser;
-use color_eyre::Result;
-use state::App;
+use color_eyre::{Result, eyre::Context};
 use std::net::SocketAddr;
 use tokio::task::JoinError;
 use tower_http::services::ServeDir;
 use tracing::{debug, error, info};
+use std::path::PathBuf;
 
+mod app;
+mod config;
 mod args;
 mod midi;
 mod player;
+mod player2;
 mod recorder;
 mod server;
 mod state;
+
+/// Program to automatically start MIDI recordings of songs played on an attached MIDI device.
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+pub struct Args {
+    /// Path of the config file
+    #[clap(short('c'), long, default_value("autorec.toml"))]
+    pub config: PathBuf,
+}
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
 
-    let args = args::Args::parse();
+    let args = Args::parse();
+    let config_toml = std::fs::read_to_string(args.config).context("reading config file")?;
+    let config = toml::from_str::<config::Config>(&config_toml).context("parsing config file")?;
 
     // Initialize state
-    let proto_app_ref = App::new_shared(&args);
-
-    // Set up midi context
-    let midi = midi::Manager::new();
-
-    let mut devices = midi.create_device_listener()?;
-
-    let app_ref = proto_app_ref.clone();
-    let midi_device_thread = tokio::spawn(async move {
-        info!("Started device handling");
-        loop {
-            let event = devices.next().await?;
-            debug!("Got device event: {event:?}");
-
-            match event {
-                midi::DeviceEvent::Connected { device, info } => {
-                    let mut state = app_ref.state_mut();
-
-                    if info.client_name.contains(&args.midi_client) {
-                        if let Some(dev) = state.connected_device.as_ref() {
-                            info!("Already recording on {}", dev.id());
-                        } else {
-                            info!("Matching client {} connected", info.client_name);
-                            state.connected_device = Some(device.clone());
-                            match midi.create_recorder(&device) {
-                                Ok(rec) => {
-                                    let inner_app_ref = app_ref.clone();
-                                    tokio::spawn(async move {
-                                        info!("Beginning recording");
-                                        if let Err(err) =
-                                            recorder::run_recorder(inner_app_ref.clone(), rec).await
-                                        {
-                                            error!("Recorder failed: {}", err)
-                                        } else {
-                                            info!("Recorder shut down");
-                                        }
-                                        // reset recording state
-                                        let mut state = inner_app_ref.state_mut();
-                                        state.connected_device = None;
-                                    });
-                                }
-                                Err(err) => {
-                                    error!(
-                                        "Failed to set up recorder for {}: {}",
-                                        device.id(),
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        info!("Ignoring client {}: no match", info.client_name);
-                    }
-
-                    state.devices.insert(device, info);
-                }
-                midi::DeviceEvent::Disconnected { device } => {
-                    let mut state = app_ref.state_mut();
-                    state.devices.remove(&device);
-                }
-            }
-        }
-    });
+    let app = app::App::new(config.app)?;
 
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();
 
     // Spawn a web server for remote interaction
-    let state_ref = proto_app_ref.clone();
-    let web_thread = tokio::spawn(async move {
-        let mut app = Router::new()
-            .route("/devices", get(server::devices))
+    let web_thread = tokio::spawn({
+        let app = app.clone();
+        async move {
+        let mut router = Router::new()
+            //.route("/devices", get(server::devices))
             .route("/songs", get(server::songs))
             .route("/play", post(server::play))
             .route("/stop", post(server::stop))
             .route("/play-status", get(server::play_status));
 
-        if let Some(dir) = args.serve_frontend.as_ref() {
+        if let Some(dir) = config.web.serve_frontend.as_ref() {
             async fn handle_error(_err: std::io::Error) -> impl IntoResponse {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.")
             }
 
-            app = app.fallback(get_service(ServeDir::new(dir)).handle_error(handle_error));
+            router = router.fallback(get_service(ServeDir::new(dir)).handle_error(handle_error));
         }
 
-        app = app.layer(Extension(state_ref));
+        router = router.layer(Extension(app));
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
         tracing::info!("Web server listening on http://{}", addr);
         axum::Server::bind(&addr)
-            .serve(app.into_make_service())
+            .serve(router.into_make_service())
             .await?;
         Result::<()>::Ok(())
-    });
+    }});
 
     // Wait for the first to exit: this should normally be the signal handler
     // (unless something goes terribly wrong)
@@ -130,7 +84,7 @@ async fn main() -> Result<()> {
             Ok(())
         },
         thread_result = web_thread => handle_thread_exit("web", thread_result),
-        thread_result = midi_device_thread => handle_thread_exit("midi-device", thread_result),
+        // TODO: poll App threads
     }
 }
 
