@@ -53,6 +53,18 @@ function RecordingsList() {
   return (
     <ListGroup>
       {
+        state.isRecording
+          ? (
+            <ListGroup.Item key="recording">
+              <Stack direction='horizontal'>
+                <Spinner animation='grow' variant="danger" />
+                <div className="ms-2">Recording in progress</div>                
+              </Stack>
+            </ListGroup.Item>
+          )
+          : <></>
+      }
+      {
         state.recordings.map(item => (
           <ListGroup.Item key={item}>
             <RecordingItem
@@ -62,9 +74,9 @@ function RecordingsList() {
                   ? PlayingState.Pending
                   : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)
               }
-              onPlay={ () => actions.playRecording(dispatch, item) }
-              onStop={ () => actions.stopPlaying(dispatch) }
-              />
+              onPlay={() => actions.playRecording(dispatch, item)}
+              onStop={() => actions.stopPlaying(dispatch)}
+            />
           </ListGroup.Item>
         ))
       }
@@ -81,7 +93,7 @@ type RecordingItemProps = {
 
 const RecordingItem = React.memo((props: RecordingItemProps) => {
   function button() {
-    switch(props.playingState) {
+    switch (props.playingState) {
       case PlayingState.Pending:
         return (<Button disabled><Spinner size="sm" animation="border" /></Button>)
       case PlayingState.Playing:
@@ -99,7 +111,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
           : <></>
       }
       <div className="ms-auto"></div>
-      { button() }
+      {button()}
     </Stack>
   );
 });

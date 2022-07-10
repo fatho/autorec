@@ -13,14 +13,20 @@ enum ActionType {
     QueryRecordingsFailed,
     QueryRecordingsSucceeded,
 
+    RecordBegin,
+    RecordEnd,
+
     PlayControlPending,
     PlayStateUpdated,
     PlayStateFailed,
 }
 
+type Recording = string;
+
 type Action = {
     type: ActionType,
-    recordings?: Array<string>,
+    recordings?: Array<Recording>,
+    recording?: Recording,
     errorMessage?: string,
     playing?: string | null,
 }
@@ -32,13 +38,17 @@ enum PlayingState {
 }
 
 type AppState = {
-    recordings: Array<string>,
+    recordings: Array<Recording>,
     recordingsLoading: boolean,
+
     error: boolean,
     errorMessage: string,
+
     playingState: PlayingState,
     playingRecording: string | null,
     playingQueued: string | null,
+
+    isRecording: boolean,
 };
 
 const initialState: AppState = {
@@ -51,6 +61,8 @@ const initialState: AppState = {
     playingState: PlayingState.Pending,
     playingRecording: null,
     playingQueued: null,
+
+    isRecording: false,
 };
 
 type ActionDispatch = (a: Action) => void;
@@ -157,6 +169,20 @@ function reducer(state: AppState, action: Action): AppState {
                 error: true,
                 errorMessage: action.errorMessage!,
             }
+
+        case ActionType.RecordBegin:
+            return {
+                ...state,
+                isRecording: true,
+            }
+
+        case ActionType.RecordEnd:
+            return {
+                ...state,
+                recordings: [action.recording!, ...state.recordings],
+                isRecording: false,
+            }
+        
         case ActionType.PlayStateUpdated:
             return {
                 ...state,

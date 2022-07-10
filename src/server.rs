@@ -79,6 +79,8 @@ pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<String>> {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum UpdateEvent {
+    RecordBegin,
+    RecordEnd { recording: String },
     PlayBegin { recording: String },
     PlayEnd
 }
@@ -88,8 +90,8 @@ impl UpdateEvent {
         match change {
             StateChange::ListenBegin { device, info } => None,
             StateChange::ListenEnd => None,
-            StateChange::RecordBegin => None,
-            StateChange::RecordEnd { recording } => None,
+            StateChange::RecordBegin => Some(UpdateEvent::RecordBegin),
+            StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd { recording: recording.0 }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin { recording: recording.0 }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
         }

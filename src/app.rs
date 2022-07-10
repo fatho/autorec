@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
 use crate::{
     config::AppConfig,
-    midi::{self, Device, DeviceInfo, RecordEvent}, recorder, player2,
+    midi::{self, Device, DeviceInfo, RecordEvent, MidiEvent}, recorder, player2,
 };
 
 use serde::Serialize;
@@ -95,6 +95,14 @@ impl App {
         state.player_current.clone()
     }
 
+    pub async fn start_recording(&self) {
+        let _ = self.app_tx.send(AppEvent::RecordingStart).await;
+    }
+
+    pub async fn finish_recording(&self, events: Vec<RecordEvent>) {
+        let _ = self.app_tx.send(AppEvent::RecordingDone { events }).await;
+    }
+
     fn notify(&self, change: StateChange) {
         // ignore errors - we don't care if no one is listening
         let _ = self.change_tx.send(change);
@@ -151,7 +159,15 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                 app.notify(StateChange::RecordBegin);
             }
             AppEvent::RecordingDone { events } => {
-                app.notify(StateChange::RecordEnd { recording: todo!("store recording") });
+
+                let name = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+                if let Err(err) = store_recording(&app, &name, events) {
+                    error!("Failed to save song '{}': {}", name, err);
+                } else {
+                    info!("Recorded song '{}'", name);
+                }
+                // TODO: notify aout error
+                app.notify(StateChange::RecordEnd { recording: RecordingId(name) });
             }
             AppEvent::PlayerStart { recording } => {
                 let playback_device = {
@@ -235,6 +251,64 @@ async fn play_recording(app: &Arc<App>, device: Option<String>, recording: Recor
         ))
     }
 }
+pub fn store_recording(app: &App, name: &str, events: Vec<RecordEvent>) -> std::io::Result<()> {
+    let mut filepath = app.config.data_directory.join(name);
+    filepath.set_extension("mid");
+
+    let mut smf = midly::Smf::new(midly::Header::new(
+        midly::Format::SingleTrack,
+        midly::Timing::Metrical(midly::num::u15::new(96)),
+    ));
+    let mut track = Vec::new();
+    let mut last_time = events.first().map_or(0, |rev| rev.timestamp);
+
+    for event in events.iter() {
+        let delta = event.timestamp - last_time;
+        last_time = event.timestamp;
+
+        track.push(midly::TrackEvent {
+            delta: midly::num::u28::new(delta),
+            kind: match event.payload {
+                MidiEvent::NoteOn {
+                    channel,
+                    note,
+                    velocity,
+                } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::NoteOn {
+                        key: note.into(),
+                        vel: velocity.into(),
+                    },
+                },
+                MidiEvent::NoteOff { channel, note } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::NoteOff {
+                        key: note.into(),
+                        vel: 0.into(),
+                    },
+                },
+                MidiEvent::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::Controller {
+                        controller: (controller as u8).into(),
+                        value: (value as u8).into(),
+                    },
+                },
+            },
+        })
+    }
+    track.push(midly::TrackEvent {
+        delta: 0.into(),
+        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+    });
+    smf.tracks.push(track);
+
+    smf.save(filepath)
+}
 
 
 async fn open_recording(app: &Arc<App>, recording: &RecordingId) -> std::io::Result<tokio::fs::File> {
@@ -266,17 +340,13 @@ fn handle_new_device(app: &Arc<App>, device: Device, info: DeviceInfo) {
 
                     let inner_app = app.clone();
                     tokio::spawn(async move {
-                        let mut rec = rec;
-                        while let Ok(Some(_)) = rec.next().await {
+                        if let Err(err) =
+                            recorder::run_recorder(inner_app.clone(), rec).await
+                        {
+                            error!("Recorder failed: {}", err)
+                        } else {
+                            info!("Recorder shut down");
                         }
-                        // TODO: reinstante recorder
-                        // if let Err(err) =
-                        //     recorder::run_recorder(todo!(), rec).await
-                        // {
-                        //     error!("Recorder failed: {}", err)
-                        // } else {
-                        //     info!("Recorder shut down");
-                        // }
                         // Notify app about stopping
                         let _ = inner_app.app_tx.send(AppEvent::RecorderShutDown { device }).await;
                     });

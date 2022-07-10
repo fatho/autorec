@@ -49,6 +49,17 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                             playing: null,
                         });
                         break;
+                    case "RecordBegin":
+                        dispatch({
+                            type: State.ActionType.RecordBegin,
+                        });
+                        break;
+                    case "RecordEnd":
+                        dispatch({
+                            type: State.ActionType.RecordEnd,
+                            recording: data.recording,
+                        });
+                        break;
                 }
                 console.log(data);
             } catch (ex) {
