@@ -1,10 +1,13 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration, convert::Infallible};
 
-use axum::{Extension, Json, response::IntoResponse, http::StatusCode};
+use axum::{Extension, Json, response::{IntoResponse, Sse, sse::{Event, KeepAlive}}, http::{StatusCode, HeaderValue}, extract::{WebSocketUpgrade, ws::{WebSocket, Message}}};
+use futures_util::{Stream, stream};
+use tokio::sync::broadcast;
+use tokio_stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{error, info};
 
-use crate::app::{App, RecordingId};
+use crate::app::{App, RecordingId, StateChange};
 
 #[derive(Serialize, Deserialize)]
 pub struct DeviceObject {
@@ -71,4 +74,98 @@ pub async fn stop(app: Extension<Arc<App>>, Json(()): Json<()>) -> Json<()> {
 
 pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<String>> {
     Json(app.playing_recording().map(|rec| rec.0))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum UpdateEvent {
+    PlayBegin { recording: String },
+    PlayEnd
+}
+
+impl UpdateEvent {
+    pub fn from_state_change(change: StateChange) -> Option<UpdateEvent> {
+        match change {
+            StateChange::ListenBegin { device, info } => None,
+            StateChange::ListenEnd => None,
+            StateChange::RecordBegin => None,
+            StateChange::RecordEnd { recording } => None,
+            StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin { recording: recording.0 }),
+            StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
+        }
+    }
+}
+
+pub async fn updates_sse(
+    app: Extension<Arc<App>>,
+) -> impl IntoResponse {
+    let mut events = app.subscribe();
+
+    let source = async_stream::stream! {
+        yield Event::default().comment("Welcome!");
+        loop {
+            match events.recv().await {
+                Ok(change) => {
+                    let update_event = UpdateEvent::from_state_change(change);
+                    let sse_event = Event::default().json_data(update_event).expect("event type can be serialized");
+                    yield sse_event;
+                },
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    continue;
+                },
+                Err(_) => break,
+            }
+        }
+    };
+    let stream = source.map(Result::<_, Infallible>::Ok);
+
+    let mut response = Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
+    response.headers_mut().insert("Cache-Control", HeaderValue::from_static("no-cache, no-store, no-transform, must-revalidate"));
+    response
+}
+
+pub async fn updates_ws(
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(handle_socket)
+}
+
+async fn handle_socket(mut socket: WebSocket) {
+    // if let Some(msg) = socket.recv().await {
+    //     if let Ok(msg) = msg {
+    //         match msg {
+    //             Message::Text(t) => {
+    //                 println!("client sent str: {:?}", t);
+    //             }
+    //             Message::Binary(_) => {
+    //                 println!("client sent binary data");
+    //             }
+    //             Message::Ping(_) => {
+    //                 println!("socket ping");
+    //             }
+    //             Message::Pong(_) => {
+    //                 println!("socket pong");
+    //             }
+    //             Message::Close(_) => {
+    //                 println!("client disconnected");
+    //                 return;
+    //             }
+    //         }
+    //     } else {
+    //         println!("client disconnected");
+    //         return;
+    //     }
+    // }
+
+    loop {
+        if socket
+            .send(Message::Text(String::from("Hi!")))
+            .await
+            .is_err()
+        {
+            println!("client disconnected");
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
 }

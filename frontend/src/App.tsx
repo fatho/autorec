@@ -3,7 +3,7 @@ import logo from './logo.svg';
 import './App.css';
 
 // Icons
-import { ArrowClockwise, StopFill, PlayFill } from 'react-bootstrap-icons';
+import { ArrowClockwise, StopFill, PlayFill, Steam } from 'react-bootstrap-icons';
 
 import Button from 'react-bootstrap/Button';
 import Alert from 'react-bootstrap/esm/Alert';
@@ -16,6 +16,8 @@ import Row from 'react-bootstrap/esm/Row';
 import ListGroup from 'react-bootstrap/esm/ListGroup';
 import Stack from 'react-bootstrap/esm/Stack';
 
+import { AppContextProvider, useAppContext } from './App/AppContext';
+import { PlayingState } from './App/State';
 
 function App() {
   return (
@@ -34,12 +36,64 @@ function App() {
           </Navbar.Brand>
         </Container>
       </Navbar>
-      <SongList />
+      <AppContextProvider>
+        <Container>
+          <RecordingsList />
+        </Container>
+      </AppContextProvider>
     </div>
   );
 }
 
-function SongList() {
+function RecordingsList() {
+  const { state, actions, dispatch } = useAppContext();
+
+  return (
+    <ListGroup>
+      {
+        state.recordings.map(item => (
+          <ListGroup.Item key={item}>
+            <RecordingItem
+              recording={item}
+              playingState={
+                state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped
+              }
+              onPlay={ () => actions.playRecording(dispatch, item) }
+              onStop={ () => actions.stopPlaying(dispatch) }
+              />
+          </ListGroup.Item>
+        ))
+      }
+    </ListGroup>
+  )
+}
+
+type RecordingItemProps = {
+  recording: string,
+  playingState: PlayingState,
+  onPlay: () => void,
+  onStop: () => void,
+};
+
+const RecordingItem = React.memo((props: RecordingItemProps) => {
+  return (
+    <Stack direction='horizontal'>
+      <div className="text-truncate">{props.recording}</div>
+      <div className="ms-auto"></div>
+      {
+        // TODO: disable button when request is in flight
+        // controlLoading === props.
+        //   ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
+        //   :
+        props.playingState === PlayingState.Playing
+          ? (<Button onClick={props.onStop}><StopFill /></Button>)
+          : (<Button onClick={props.onPlay}><PlayFill /></Button>)
+      }
+    </Stack>
+  );
+});
+
+function OldSongList() {
   const [songsLoading, setSongsLoading] = useState(false);
   const [controlLoading, setControlLoading] = useState(null as null | string);
   const [songs, setSongs] = useState([]);

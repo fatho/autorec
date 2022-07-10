@@ -5,16 +5,19 @@ use axum::{
     Extension, Router,
 };
 use clap::Parser;
-use color_eyre::{Result, eyre::Context};
+use color_eyre::{eyre::Context, Result};
 use std::net::SocketAddr;
-use tokio::task::JoinError;
-use tower_http::services::ServeDir;
-use tracing::{debug, error, info};
 use std::path::PathBuf;
+use tokio::task::JoinError;
+use tower_http::{
+    services::ServeDir,
+    trace::{DefaultMakeSpan, TraceLayer},
+};
+use tracing::{debug, error, info};
 
 mod app;
-mod config;
 mod args;
+mod config;
 mod midi;
 mod player;
 mod player2;
@@ -30,7 +33,6 @@ pub struct Args {
     #[clap(short('c'), long, default_value("autorec.toml"))]
     pub config: PathBuf,
 }
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,30 +53,37 @@ async fn main() -> Result<()> {
     let web_thread = tokio::spawn({
         let app = app.clone();
         async move {
-        let mut router = Router::new()
-            //.route("/devices", get(server::devices))
-            .route("/songs", get(server::songs))
-            .route("/play", post(server::play))
-            .route("/stop", post(server::stop))
-            .route("/play-status", get(server::play_status));
+            let mut router = Router::new()
+                //.route("/devices", get(server::devices))
+                .route("/songs", get(server::songs))
+                .route("/play", post(server::play))
+                .route("/stop", post(server::stop))
+                .route("/play-status", get(server::play_status))
+                .route("/updates", get(server::updates_ws))
+                .route("/updates-sse", get(server::updates_sse));
 
-        if let Some(dir) = config.web.serve_frontend.as_ref() {
-            async fn handle_error(_err: std::io::Error) -> impl IntoResponse {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.")
+            if let Some(dir) = config.web.serve_frontend.as_ref() {
+                async fn handle_error(_err: std::io::Error) -> impl IntoResponse {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.")
+                }
+
+                router =
+                    router.fallback(get_service(ServeDir::new(dir)).handle_error(handle_error));
             }
 
-            router = router.fallback(get_service(ServeDir::new(dir)).handle_error(handle_error));
+            router = router.layer(Extension(app)).layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+            );
+
+            let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
+            tracing::info!("Web server listening on http://{}", addr);
+            axum::Server::bind(&addr)
+                .serve(router.into_make_service())
+                .await?;
+            Result::<()>::Ok(())
         }
-
-        router = router.layer(Extension(app));
-
-        let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
-        tracing::info!("Web server listening on http://{}", addr);
-        axum::Server::bind(&addr)
-            .serve(router.into_make_service())
-            .await?;
-        Result::<()>::Ok(())
-    }});
+    });
 
     // Wait for the first to exit: this should normally be the signal handler
     // (unless something goes terribly wrong)

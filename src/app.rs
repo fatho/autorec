@@ -5,6 +5,7 @@ use crate::{
     midi::{self, Device, DeviceInfo, RecordEvent}, recorder, player2,
 };
 
+use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, error};
 
@@ -167,6 +168,8 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
 
                 match play_recording(&app, playback_device, recording.clone()).await {
                     Ok(player) => {
+                        app.notify(StateChange::PlayBegin { recording: recording.clone() });
+
                         let mut state = app.state.write().unwrap();
                         state.player = Some(player);
                         state.player_current = Some(recording);
@@ -190,6 +193,8 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                 if let Some(queued) = queued {
                     match play_recording(&app, playback_device, queued.clone()).await {
                         Ok(player) => {
+                            app.notify(StateChange::PlayBegin { recording: queued.clone() });
+
                             let mut state = app.state.write().unwrap();
                             state.player = Some(player);
                             state.player_current = Some(queued);
