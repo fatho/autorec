@@ -3,7 +3,7 @@ import logo from './logo.svg';
 import './App.css';
 
 // Icons
-import { ArrowClockwise, StopFill, PlayFill, Steam } from 'react-bootstrap-icons';
+import { ArrowClockwise, StopFill, PlayFill, Steam, Boombox, VolumeUp } from 'react-bootstrap-icons';
 
 import Button from 'react-bootstrap/Button';
 import Alert from 'react-bootstrap/esm/Alert';
@@ -38,6 +38,8 @@ function App() {
       </Navbar>
       <AppContextProvider>
         <Container>
+          <Toolbar />
+          <ErrorBanner />
           <RecordingsList />
         </Container>
       </AppContextProvider>
@@ -56,7 +58,9 @@ function RecordingsList() {
             <RecordingItem
               recording={item}
               playingState={
-                state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped
+                state.playingState === PlayingState.Pending && state.playingQueued === item
+                  ? PlayingState.Pending
+                  : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)
               }
               onPlay={ () => actions.playRecording(dispatch, item) }
               onStop={ () => actions.stopPlaying(dispatch) }
@@ -76,182 +80,67 @@ type RecordingItemProps = {
 };
 
 const RecordingItem = React.memo((props: RecordingItemProps) => {
+  function button() {
+    switch(props.playingState) {
+      case PlayingState.Pending:
+        return (<Button disabled><Spinner size="sm" animation="border" /></Button>)
+      case PlayingState.Playing:
+        return (<Button onClick={props.onStop}><StopFill /></Button>)
+      case PlayingState.Stopped:
+        return (<Button onClick={props.onPlay}><PlayFill /></Button>)
+    }
+  }
   return (
     <Stack direction='horizontal'>
       <div className="text-truncate">{props.recording}</div>
-      <div className="ms-auto"></div>
       {
-        // TODO: disable button when request is in flight
-        // controlLoading === props.
-        //   ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
-        //   :
-        props.playingState === PlayingState.Playing
-          ? (<Button onClick={props.onStop}><StopFill /></Button>)
-          : (<Button onClick={props.onPlay}><PlayFill /></Button>)
+        props.playingState == PlayingState.Playing
+          ? <VolumeUp size="1.5em" />
+          : <></>
       }
+      <div className="ms-auto"></div>
+      { button() }
     </Stack>
   );
 });
 
-function OldSongList() {
-  const [songsLoading, setSongsLoading] = useState(false);
-  const [controlLoading, setControlLoading] = useState(null as null | string);
-  const [songs, setSongs] = useState([]);
-  const [error, setError] = useState(null as null | string);
-  const [playing, setPlaying] = useState(null as null | string);
 
-  const fetchSongs = async () => {
-    try {
-      setSongsLoading(true);
-      const response = await fetch("/songs");
-      const data = await response.json();
-      setSongs(data);
-      setError(null);
-    } catch (e) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Unknown error");
-      }
-    }
-    setSongsLoading(false);
-  };
+function ErrorBanner() {
+  const { state } = useAppContext();
 
-  const playSong = async (item: string) => {
-    setControlLoading(item);
-    try {
-      const response = await fetch("/play", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ "name": item })
-      });
-      if (response.status < 200 || response.status >= 300) {
-        const message = await response.text();
-        setError(response.statusText + ': ' + message);
-      } else {
-        setError(null);
-        setPlaying(item);
-      }
-    } catch (e) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Unknown error");
-      }
-    }
-    setControlLoading(null);
-  }
+  return state.error ? (
+    <Alert key="error" variant="danger">
+      {state.errorMessage}
+    </Alert>
+  ) : <></>
+}
 
-  const stopSong = async () => {
-    setControlLoading(playing);
-    try {
-      setPlaying(null);
-
-      const response = await fetch("/stop", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(null)
-      });
-      if (response.status < 200 || response.status >= 300) {
-        const message = await response.text();
-        setError(response.statusText + ': ' + message);
-      } else {
-        setError(null);
-      }
-    } catch (e) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Unknown error");
-      }
-    }
-    setControlLoading(null);
-  }
-
-  const updatePlaying = async () => {
-    try {
-      const response = await fetch("/play-status");
-      const data = await response.json();
-      setPlaying(data);
-    } catch (e) {
-      if (e instanceof Error) {
-        console.log("Failed to poll playing status" + e.message);
-      } else {
-        console.log("Failed to poll playing status" + e);
-      }
-    }
-  };
-
-  useEffect(() => {
-    fetchSongs();
-  }, []);
-
-  useEffect(() => {
-    updatePlaying();
-    const timer = setInterval(updatePlaying, 2000);
-    return () => {
-      clearInterval(timer);
-    }
-  }, []);
+function Toolbar() {
+  const { state, actions, dispatch } = useAppContext();
 
   return (
-    <Container className="border">
-      <ButtonToolbar className="mt-2 mb-3" aria-label="Song control">
-        <ButtonGroup className="me-2" aria-label="First group">
-          {
-            songsLoading
-              ? (
-                <Button variant="secondary" disabled>
-                  <Spinner animation="border" role="status" size="sm" />
-                </Button>
-              )
-              : (
-                <Button variant="secondary" onClick={fetchSongs}><ArrowClockwise /></Button>
-              )
-          }
-        </ButtonGroup>
-        <ButtonGroup className="me-2" aria-label="Second group">
-          {
-            controlLoading !== null
-              ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
-              : (<Button variant="secondary" disabled={playing === null} onClick={stopSong}><StopFill /></Button>)
-          }
-        </ButtonGroup>
-      </ButtonToolbar>
-      {
-        error
-          ? (
-            <Alert key="error" variant="danger">
-              {error}
-            </Alert>
-          )
-          : null
-      }
-      <ListGroup>
+    <ButtonToolbar className="pt-2 pb-2" aria-label="Song control">
+      <ButtonGroup className="me-2" aria-label="First group">
         {
-          songs.map(item => (
-            <ListGroup.Item key={item}>
-              <Stack direction='horizontal'>
-                <div className="text-truncate">{item}</div>
-                <div className="ms-auto"></div>
-                {
-                  controlLoading === item
-                    ? (<Button disabled><Spinner animation="border" size="sm" /></Button>)
-                    :
-                    (playing === item
-                      ? (<Button disabled={controlLoading !== null} onClick={stopSong}><StopFill /></Button>)
-                      : (<Button disabled={controlLoading !== null} onClick={() => playSong(item)}><PlayFill /></Button>))
-                }
-              </Stack>
-            </ListGroup.Item>
-          ))
+          state.recordingsLoading
+            ? (
+              <Button variant="secondary" disabled>
+                <Spinner animation="border" role="status" size="sm" />
+              </Button>
+            )
+            : (
+              <Button variant="secondary" onClick={() => actions.queryRecordings(dispatch)}><ArrowClockwise /></Button>
+            )
         }
-      </ListGroup>
-    </Container>
+      </ButtonGroup>
+      <ButtonGroup className="me-2" aria-label="Second group">
+        {
+          state.playingState === PlayingState.Pending
+            ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
+            : (<Button variant="secondary" disabled={state.playingState === PlayingState.Stopped} onClick={() => actions.stopPlaying(dispatch)}><StopFill /></Button>)
+        }
+      </ButtonGroup>
+    </ButtonToolbar>
   )
 }
 

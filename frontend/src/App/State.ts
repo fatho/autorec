@@ -13,7 +13,9 @@ enum ActionType {
     QueryRecordingsFailed,
     QueryRecordingsSucceeded,
 
+    PlayControlPending,
     PlayStateUpdated,
+    PlayStateFailed,
 }
 
 type Action = {
@@ -36,30 +38,53 @@ type AppState = {
     errorMessage: string,
     playingState: PlayingState,
     playingRecording: string | null,
+    playingQueued: string | null,
 };
 
 const initialState: AppState = {
     recordings: [],
     recordingsLoading: false,
+
     error: false,
     errorMessage: "",
+
     playingState: PlayingState.Pending,
     playingRecording: null,
+    playingQueued: null,
 };
 
 type ActionDispatch = (a: Action) => void;
+
+class StatusError extends Error {
+    constructor(msg: string) {
+        super(msg);
+    }
+}
+
+async function checkForStatus(response: Response) {
+    if(response.status < 200 || response.status >= 300) {
+        const data = await response.text();
+        try {
+            const json = JSON.parse(data);
+            if(typeof json === "string") {
+                throw new StatusError(json);
+            } else {
+                throw new StatusError(json.message);
+            }
+        } catch(e) {
+            throw new StatusError(data);
+        }
+    }
+}
 
 const actions = {
     queryRecordings: async (dispatch: ActionDispatch) => {
         dispatch({ type: ActionType.QueryRecordingsPending });
         try {
             const response = await fetch("/songs");
+            await checkForStatus(response);
             const data = await response.json();
-            if (response.status === 200) {
-                dispatch({ type: ActionType.QueryRecordingsSucceeded, recordings: data });
-            } else {
-                dispatch({ type: ActionType.QueryRecordingsFailed, errorMessage: data });
-            }
+            dispatch({ type: ActionType.QueryRecordingsSucceeded, recordings: data });
         } catch (e) {
             dispatch({ type: ActionType.QueryRecordingsFailed, errorMessage: (e as object).toString() });
         }
@@ -69,44 +94,44 @@ const actions = {
         //dispatch({ type: ActionType.PlayStatePending });
         try {
             const response = await fetch("/play-status");
+            await checkForStatus(response);
             const data = await response.json();
             dispatch({ type: ActionType.PlayStateUpdated, playing: data });
         } catch (e) {
-            console.log(`Failed to get play state ${e}`)
-            //dispatch({ type: ActionType.QueryRecordingsFailed, errorMessage: (e as object).toString() });
+            dispatch({ type: ActionType.PlayStateFailed, errorMessage: (e as object).toString() });
         }
     },
 
     playRecording: async (dispatch: ActionDispatch, recording: string) => {
-        const response = await fetch("/play", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ "name": recording })
-        });
-        // TODO: error handling
-
-        // if (response.status < 200 || response.status >= 300) {
-        //   const message = await response.text();
-        //   setError(response.statusText + ': ' + message);
-        // } else {
-        //   setError(null);
-        //   setPlaying(item);
-        // }
-
+        dispatch({ type: ActionType.PlayControlPending, playing: recording });
+        try {
+            const response = await fetch("/play", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ "name": recording })
+            });
+            await checkForStatus(response);
+        } catch (e) {
+            dispatch({ type: ActionType.PlayStateFailed, errorMessage: (e as object).toString() });
+        }
     },
 
     stopPlaying: async (dispatch: ActionDispatch) => {
-        const response = await fetch("/stop", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(null)
-        });
-        // TODO: error handling
-
+        dispatch({ type: ActionType.PlayControlPending, playing: null });
+        try {
+            const response = await fetch("/stop", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(null)
+            });
+            await checkForStatus(response);
+        } catch (e) {
+            dispatch({ type: ActionType.PlayStateFailed, errorMessage: (e as object).toString() });
+        }
     },
 };
 
@@ -116,8 +141,6 @@ function reducer(state: AppState, action: Action): AppState {
             return {
                 ...state,
                 recordingsLoading: true,
-                error: false,
-                errorMessage: "",
             }
         case ActionType.QueryRecordingsSucceeded:
             return {
@@ -139,6 +162,21 @@ function reducer(state: AppState, action: Action): AppState {
                 ...state,
                 playingRecording: action.playing!,
                 playingState: action.playing! ? PlayingState.Playing : PlayingState.Stopped,
+            }
+        case ActionType.PlayControlPending:
+            return {
+                ...state,
+                playingState: PlayingState.Pending,
+                playingQueued: action.playing!,
+            }
+        case ActionType.PlayStateFailed:
+            return {
+                ...state,
+                playingState: PlayingState.Stopped,
+                playingQueued: null,
+                playingRecording: null,
+                error: true,
+                errorMessage: action.errorMessage!,
             }
         default:
             throw new Error(`Unknown action type: ${action.type}`)
