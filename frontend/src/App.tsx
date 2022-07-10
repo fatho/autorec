@@ -3,7 +3,7 @@ import logo from './logo.svg';
 import './App.css';
 
 // Icons
-import { ArrowClockwise, StopFill, PlayFill, Steam, Boombox, VolumeUp } from 'react-bootstrap-icons';
+import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash } from 'react-bootstrap-icons';
 
 import Button from 'react-bootstrap/Button';
 import Alert from 'react-bootstrap/esm/Alert';
@@ -18,6 +18,7 @@ import Stack from 'react-bootstrap/esm/Stack';
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState } from './App/State';
+import { Modal } from 'react-bootstrap';
 
 function App() {
   return (
@@ -37,8 +38,8 @@ function App() {
         </Container>
       </Navbar>
       <AppContextProvider>
-        <Container>
-          <Toolbar />
+        <Container className="px-0 px-sm-2">
+          <Toolbar className="ms-2 ms-sm-0 my-2" />
           <ErrorBanner />
           <RecordingsList />
         </Container>
@@ -50,37 +51,57 @@ function App() {
 function RecordingsList() {
   const { state, actions, dispatch } = useAppContext();
 
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState("");
+
+  const handleClose = () => setShowConfirmDelete(false);
+
+  function confirmDelete(item: string) {
+    setItemToDelete(item);
+    setShowConfirmDelete(true);
+  }
+
   return (
-    <ListGroup>
-      {
-        state.isRecording
+    <>
+      <Modal show={showConfirmDelete} onHide={handleClose}>
+        <Modal.Header closeButton>
+          <Modal.Title>Confirm deletion</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>Delete recording {itemToDelete}?</Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={handleClose}>
+            Delete
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <ListGroup>
+        {state.isRecording
           ? (
             <ListGroup.Item key="recording">
               <Stack direction='horizontal'>
                 <Spinner animation='grow' variant="danger" />
-                <div className="ms-2">Recording in progress</div>                
+                <div className="ms-2">Recording in progress</div>
               </Stack>
             </ListGroup.Item>
           )
-          : <></>
-      }
-      {
-        state.recordings.map(item => (
+          : <></>}
+        {state.recordings.map(item => (
           <ListGroup.Item key={item}>
             <RecordingItem
               recording={item}
-              playingState={
-                state.playingState === PlayingState.Pending && state.playingQueued === item
-                  ? PlayingState.Pending
-                  : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)
-              }
+              playingState={state.playingState === PlayingState.Pending && state.playingQueued === item
+                ? PlayingState.Pending
+                : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)}
               onPlay={() => actions.playRecording(dispatch, item)}
               onStop={() => actions.stopPlaying(dispatch)}
-            />
+              onRequestDelete={() => confirmDelete(item)} />
           </ListGroup.Item>
-        ))
-      }
-    </ListGroup>
+        ))}
+      </ListGroup></>
   )
 }
 
@@ -89,17 +110,18 @@ type RecordingItemProps = {
   playingState: PlayingState,
   onPlay: () => void,
   onStop: () => void,
+  onRequestDelete: () => void,
 };
 
 const RecordingItem = React.memo((props: RecordingItemProps) => {
   function button() {
     switch (props.playingState) {
       case PlayingState.Pending:
-        return (<Button disabled><Spinner size="sm" animation="border" /></Button>)
+        return (<Button variant="outline-primary" disabled><Spinner size="sm" animation="border" /></Button>)
       case PlayingState.Playing:
-        return (<Button onClick={props.onStop}><StopFill /></Button>)
+        return (<Button variant="outline-primary" onClick={props.onStop}><StopFill /></Button>)
       case PlayingState.Stopped:
-        return (<Button onClick={props.onPlay}><PlayFill /></Button>)
+        return (<Button variant="outline-primary" onClick={props.onPlay}><PlayFill /></Button>)
     }
   }
   return (
@@ -111,6 +133,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
           : <></>
       }
       <div className="ms-auto"></div>
+      <Button onClick={props.onRequestDelete} variant="outline-danger" className="me-2"><Trash /></Button>
       {button()}
     </Stack>
   );
@@ -127,29 +150,31 @@ function ErrorBanner() {
   ) : <></>
 }
 
-function Toolbar() {
+
+
+function Toolbar({className}: {className: string}) {
   const { state, actions, dispatch } = useAppContext();
 
   return (
-    <ButtonToolbar className="pt-2 pb-2" aria-label="Song control">
+    <ButtonToolbar className={className} aria-label="Song control">
       <ButtonGroup className="me-2" aria-label="First group">
         {
           state.recordingsLoading
             ? (
-              <Button variant="secondary" disabled>
+              <Button variant="outline-primary" disabled>
                 <Spinner animation="border" role="status" size="sm" />
               </Button>
             )
             : (
-              <Button variant="secondary" onClick={() => actions.queryRecordings(dispatch)}><ArrowClockwise /></Button>
+              <Button variant="outline-primary" onClick={() => actions.queryRecordings(dispatch)}><ArrowClockwise /></Button>
             )
         }
       </ButtonGroup>
       <ButtonGroup className="me-2" aria-label="Second group">
         {
           state.playingState === PlayingState.Pending
-            ? (<Button variant="secondary" disabled><Spinner animation="border" size="sm" /></Button>)
-            : (<Button variant="secondary" disabled={state.playingState === PlayingState.Stopped} onClick={() => actions.stopPlaying(dispatch)}><StopFill /></Button>)
+            ? (<Button variant="outline-primary" disabled><Spinner animation="border" size="sm" /></Button>)
+            : (<Button variant="outline-primary" disabled={state.playingState === PlayingState.Stopped} onClick={() => actions.stopPlaying(dispatch)}><StopFill /></Button>)
         }
       </ButtonGroup>
     </ButtonToolbar>
