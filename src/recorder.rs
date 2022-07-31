@@ -1,13 +1,13 @@
-use std::{time::Duration, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use tracing::{info, trace};
 
-use crate::{midi::{self, RecordEvent}, app::App};
+use crate::{
+    app::App,
+    midi::{self, RecordEvent},
+};
 
-pub async fn run_recorder(
-    app: Arc<App>,
-    mut recorder: midi::Recorder,
-) -> color_eyre::Result<()> {
+pub async fn run_recorder(app: Arc<App>, mut recorder: midi::Recorder) -> color_eyre::Result<()> {
     loop {
         info!("Waiting for song to start");
         let event = recorder.next().await?;
@@ -31,15 +31,29 @@ pub async fn record_song(
 ) -> color_eyre::Result<Vec<RecordEvent>> {
     info!("Song started");
 
+    // Keeping track of keyboard state for idle-detection
+    let mut keyboard_state = KeyboardState::new();
+    keyboard_state.update(&first_event);
+
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+    const MAX_IDLE_PERIODS: usize = 6;
+    let mut idle_periods = 0;
+
+    // Initialize recording
     trace!("recorded event {:?}", first_event);
     let start_tick = first_event.timestamp;
     first_event.timestamp = 0;
     let mut events = vec![first_event];
 
+    // Keep recording until idle
     loop {
-        match tokio::time::timeout(Duration::from_secs(5), recorder.next()).await {
+        match tokio::time::timeout(IDLE_TIMEOUT, recorder.next()).await {
             Ok(event) => {
                 if let Some(mut event) = event? {
+                    // Update idle detection
+                    keyboard_state.update(&event);
+                    idle_periods = 0;
+
                     // Normalize timestamps relative to first event of this song
                     event.timestamp -= start_tick;
                     let reltime = recorder.tick_to_duration(event.timestamp);
@@ -54,9 +68,16 @@ pub async fn record_song(
                 }
             }
             Err(_elapsed) => {
-                // TODO: rather check if there are still keys down or pedals pressed
-                // Nothing played for 5 seconds => end this song
-                break;
+                if keyboard_state.is_idle() {
+                    break;
+                } else {
+                    idle_periods += 1;
+
+                    // Emergency shutoff (in case state got corrupted)
+                    if idle_periods >= MAX_IDLE_PERIODS {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -74,4 +95,47 @@ pub async fn record_song(
 
     // TODO: stream events to disk - do not keep them in memory
     Ok(events)
+}
+
+struct KeyboardState {
+    sustain_channels: HashSet<u8>,
+    pressed_keys: HashSet<(u8, u8)>,
+}
+
+impl KeyboardState {
+    fn update(&mut self, event: &RecordEvent) {
+        match event.payload {
+            midi::MidiEvent::NoteOn { channel, note, .. } => {
+                self.pressed_keys.insert((channel, note));
+            }
+            midi::MidiEvent::NoteOff { channel, note } => {
+                self.pressed_keys.remove(&(channel, note));
+            }
+            midi::MidiEvent::ControlChange {
+                channel,
+                controller,
+                value,
+            } => {
+                if controller == 64 {
+                    // Sustain
+                    if value >= 64 {
+                        self.sustain_channels.insert(channel);
+                    } else {
+                        self.sustain_channels.remove(&channel);
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_idle(&self) -> bool {
+        self.sustain_channels.is_empty() && self.pressed_keys.is_empty()
+    }
+
+    fn new() -> Self {
+        Self {
+            sustain_channels: HashSet::new(),
+            pressed_keys: HashSet::new(),
+        }
+    }
 }
