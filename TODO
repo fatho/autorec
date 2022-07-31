@@ -19,10 +19,12 @@ Pimary Goals:
 
 Features:
     Management:
-        ☐ Use SQLite database
-        ☐ Store metadata (such as created timestamp, song name, rating)
+        ✔ Use SQLite database @done(22-07-31 22:41)
+        ✔ Store metadata (such as created timestamp, song name) @done(22-07-31 22:41)
+        ☐ Store MIDI data in SQLite database
         ☐ Browse recordings by different dimensions (not just a single list)
         ☐ Find a way to deal with a lot of recordings (loading everything into the webpage won't scale)
+        ☐ Auto-complete names in rename edit field
     
     Nice-to-haves:
         ☐ Auto-detect name based on matching with previous recordings
