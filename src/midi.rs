@@ -1,8 +1,6 @@
 // NOTE: Only supports Linux (via ALSA) at the moment
 
-use alsa::seq::{
-    Addr
-};
+use alsa::seq::Addr;
 
 mod alsa_backend;
 
@@ -70,7 +68,9 @@ pub struct Manager {
 
 impl Manager {
     pub fn new() -> Self {
-        Self { registry: alsa_backend::MidiRegistry::new() }
+        Self {
+            registry: alsa_backend::MidiRegistry::new(),
+        }
     }
 
     pub fn create_device_listener(&self) -> color_eyre::Result<DeviceListener> {
@@ -78,10 +78,13 @@ impl Manager {
     }
 
     pub fn create_recorder(&self, source: &Device) -> color_eyre::Result<Recorder> {
-        alsa_backend::MidiRecorder::new(&self.registry, Addr {
-            client: source.client_id,
-            port: source.port_id,
-        })
+        alsa_backend::MidiRecorder::new(
+            &self.registry,
+            Addr {
+                client: source.client_id,
+                port: source.port_id,
+            },
+        )
     }
 }
 

@@ -7,12 +7,11 @@ use std::{
 
 use alsa::{
     seq::{
-        Addr, EvCtrl, EvNote, EventType, PortCap, PortInfo, PortSubscribe,
-        PortType, QueueTempo,
+        Addr, EvCtrl, EvNote, EventType, PortCap, PortInfo, PortSubscribe, PortType, QueueTempo,
     },
     Direction,
 };
-use tokio::io::{unix::AsyncFd};
+use tokio::io::unix::AsyncFd;
 use tracing::{debug, trace, warn};
 
 use super::{DeviceEvent, MidiEvent, RecordEvent};
@@ -393,7 +392,6 @@ impl MidiRecorder {
         }
     }
 }
-
 
 mod internal {
     use alsa::seq::{Addr, ClientInfo, PortCap, PortInfo, PortType};

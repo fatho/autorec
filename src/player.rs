@@ -71,12 +71,7 @@ impl MidiPlayer {
             }
         });
 
-        Ok((
-            Self {
-                cancellation_token,
-            },
-            completed_rx,
-        ))
+        Ok((Self { cancellation_token }, completed_rx))
     }
 
     pub fn stop(&self) {

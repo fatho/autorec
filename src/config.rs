@@ -1,21 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Serialize, Deserialize};
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub app: AppConfig,
-    pub web: WebConfig
+    pub web: WebConfig,
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
     pub data_directory: PathBuf,
     pub midi_device: String,
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct WebConfig {
