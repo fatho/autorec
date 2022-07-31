@@ -100,6 +100,14 @@ impl App {
         Ok(())
     }
 
+    pub async fn rename_recording(&self, recording: RecordingId, new_name: String) -> color_eyre::Result<RecordingEntry> {
+        let state = self.shared.state.lock().await;
+        state.store.rename_recording_by_id(recording, new_name).await?;
+        let rec = state.store.get_recording_by_id(recording).await?;
+        self.shared.notify(StateChange::RecordUpdate { recording: rec.clone() });
+        Ok(rec)
+    }
+
     pub async fn play_recording(&self, recording: RecordingId) -> color_eyre::Result<()> {
         let mut state = self.shared.state.lock().await;
         if let Some(output) = state.listening_device.clone() {
@@ -299,10 +307,10 @@ pub enum StateChange {
     RecordError { message: String },
     /// A recording was deleted
     RecordDelete { recording_id: RecordingId },
+    /// A recording was updated
+    RecordUpdate { recording: RecordingEntry },
     /// App starts playing back
     PlayBegin { recording: RecordingId },
-    /// Failed to start playback
-    PlayError { message: String },
     /// App stops playing back
     PlayEnd,
 }

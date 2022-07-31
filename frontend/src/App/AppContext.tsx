@@ -49,12 +49,6 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                                 recording_id: null,
                             });
                             break;
-                        case "PlayError":
-                            dispatch({
-                                type: State.ActionType.PlayStateFailed,
-                                errorMessage: data.message,
-                            });
-                            break;
                         case "RecordBegin":
                             dispatch({
                                 type: State.ActionType.RecordBegin,
@@ -63,6 +57,12 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                         case "RecordEnd":
                             dispatch({
                                 type: State.ActionType.RecordEnd,
+                                recording: data.recording,
+                            });
+                            break;
+                        case "RecordUpdate":
+                            dispatch({
+                                type: State.ActionType.RecordUpdate,
                                 recording: data.recording,
                             });
                             break;

@@ -49,8 +49,8 @@ pub struct RecInfo {
     pub created_at: DateTime<Utc>,
 }
 
-impl RecInfo {
-    pub fn new(entry: RecordingEntry) -> Self {
+impl From<RecordingEntry> for RecInfo {
+    fn from(entry: RecordingEntry) -> Self {
         RecInfo {
             id: entry.id,
             name: entry.name.clone(),
@@ -66,7 +66,7 @@ pub async fn get_recordings(app: Extension<App>) -> Json<Vec<RecInfo>> {
             error!("Failed to list songs: {}", err);
             vec![]
         },
-        |songs| songs.into_iter().map(RecInfo::new).collect(),
+        |songs| songs.into_iter().map(RecInfo::from).collect(),
     );
 
     Json(songs)
@@ -79,6 +79,21 @@ pub async fn delete_recording(
 ) -> Result<Json<()>, AppError> {
     app.delete_recording(recording_id).await?;
     Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct RecUpdate {
+    pub name: String,
+}
+
+/// Update a recording
+pub async fn update_recording(
+    app: Extension<App>,
+    Path((recording_id,)): Path<(RecordingId,)>,
+    Json(update): Json<RecUpdate>,
+) -> Result<Json<RecInfo>, AppError> {
+    let rec = app.rename_recording(recording_id, update.name).await?;
+    Ok(Json(rec.into()))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,8 +144,8 @@ pub enum UpdateEvent {
     RecordEnd { recording: RecInfo },
     RecordDelete { recording_id: RecordingId },
     RecordError { message: String },
+    RecordUpdate { recording: RecInfo },
     PlayBegin { recording: RecordingId },
-    PlayError { message: String },
     PlayEnd,
 }
 
@@ -141,14 +156,16 @@ impl UpdateEvent {
             StateChange::ListenEnd => None,
             StateChange::RecordBegin => Some(UpdateEvent::RecordBegin),
             StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd {
-                recording: RecInfo::new(recording),
+                recording: RecInfo::from(recording),
+            }),
+            StateChange::RecordUpdate { recording } => Some(UpdateEvent::RecordUpdate {
+                recording: RecInfo::from(recording),
             }),
             StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
                 recording: recording,
             }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
-            StateChange::PlayError { message } => Some(UpdateEvent::PlayError { message }),
             StateChange::RecordDelete { recording_id } => {
                 Some(UpdateEvent::RecordDelete { recording_id })
             }

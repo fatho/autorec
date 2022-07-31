@@ -10,6 +10,9 @@ enum ActionType {
     RecordDelete,
     RecordDeleteError,
 
+    RecordUpdate,
+    RecordUpdateError,
+
     PlayControlPending,
     PlayStateUpdated,
     PlayStateFailed,
@@ -117,6 +120,23 @@ const actions = {
         }
     },
 
+    updateRecording: async (dispatch: ActionDispatch, recording: Recording) => {
+        try {
+            const response = await fetch(`/recordings/${recording.id}`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(recording)
+            });
+            await checkForStatus(response);
+            const data = await response.json();
+            dispatch({ type: ActionType.RecordUpdate, recording: data });
+        } catch (e) {
+            dispatch({ type: ActionType.RecordUpdateError, errorMessage: (e as object).toString() });
+        }
+    },
+
     queryPlayState: async (dispatch: ActionDispatch) => {
         //dispatch({ type: ActionType.PlayStatePending });
         try {
@@ -208,6 +228,7 @@ function reducer(state: AppState, action: Action): AppState {
         case ActionType.RecordDelete:
             return {
                 ...state,
+                error: false,
                 recordings: state.recordings.filter(rec => rec.id !== action.recording_id!)
             }
         case ActionType.RecordDeleteError:
@@ -217,6 +238,24 @@ function reducer(state: AppState, action: Action): AppState {
                 errorMessage: action.errorMessage!,
             }
         
+        case ActionType.RecordUpdate:
+            const upsertedRecording = parseRecording(action.recording!);
+            const updatedRecordings = state.recordings.map(rec => 
+                rec.id == upsertedRecording.id ? 
+                    upsertedRecording : rec);
+            return {
+                ...state,
+                error: false,
+                recordings: updatedRecordings,
+                isRecording: false,
+            }
+        case ActionType.RecordUpdateError:
+            return {
+                ...state,
+                error: true,
+                errorMessage: action.errorMessage!,
+            }
+
         case ActionType.PlayStateUpdated:
             return {
                 ...state,

@@ -15,3 +15,11 @@
 .pulsing {
     animation: pulse 1s ease-in-out infinite;
 }
+
+.text-smaller {
+    font-size: 0.7rem;
+}
+
+.text-italic {
+    font-style: italic;
+}

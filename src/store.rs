@@ -93,6 +93,19 @@ impl RecordingStore {
         Ok(())
     }
 
+    pub async fn rename_recording_by_id(&self, id: RecordingId, new_name: String) -> color_eyre::Result<()> {
+        let recording = sqlx::query("UPDATE recordings SET name = ? WHERE id = ?")
+            .bind(new_name)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        if recording.rows_affected() == 0 {
+            bail!("No recording found with id {}", id.0)
+        }
+        Ok(())
+    }
+
+
     pub async fn insert_recording(&self, filename: &Path, midi_data: Vec<u8>) -> color_eyre::Result<RecordingEntry> {
         let path = self.directory.join(filename);
         std::fs::write(path, midi_data)?;

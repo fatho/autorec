@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 
 // Icons
-import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash } from 'react-bootstrap-icons';
+import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash, Pencil } from 'react-bootstrap-icons';
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState, Recording, RecordingId } from './App/State';
@@ -72,7 +72,13 @@ function RecordingsList() {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null as number | null);
 
-  const handleClose = () => setShowConfirmDelete(false);
+  const [showConfirmRename, setShowConfirmRename] = useState(false);
+  const [itemToRename, setItemToRename] = useState(null as number | null);
+  const [newName, setNewName] = useState("");
+  const renameInput = useRef(null as HTMLInputElement | null);
+
+  const handleCloseDelete = () => setShowConfirmDelete(false);
+  const handleCloseRename = () => setShowConfirmRename(false);
 
   function handleDelete() {
     if(itemToDelete) {
@@ -81,17 +87,50 @@ function RecordingsList() {
     setShowConfirmDelete(false);
   }
 
+  function handleRename() {
+    const initial = state.recordings.find(rec => rec.id === itemToRename);
+    if(itemToRename && initial) {
+      actions.updateRecording(dispatch, {
+        ...initial,
+        name: newName
+      });
+    }
+    setShowConfirmRename(false);
+  }
+
+  function handleRenameKeyUp(e: KeyboardEvent<HTMLInputElement>) {
+    if(e.key === "Enter") {
+      handleRename();
+    }
+  }
+
   function confirmDelete(item: RecordingId) {
     setItemToDelete(item);
     setShowConfirmDelete(true);
   }
 
-  // TEMP: until the backend provides more metadata, just group based on the naming scheme
-  const groups = [];
-  const otherGroup = [] as Recording[];
+  function confirmRename(item: RecordingId) {
+    const initial = state.recordings.find(rec => rec.id === item);
+    if(initial) {
+      setNewName(initial.name);
+      setItemToRename(item);
+      setShowConfirmRename(true);      
+    }
+  }
+  
+  useEffect(
+    () => {
+      if(showConfirmRename && renameInput.current) {
+        renameInput.current.focus();
+      }
+    },
+    [showConfirmRename, renameInput]
+  )
+
+  const groups: { title: string, items: Recording[] }[] = [];
 
   var currentGroup = null as string | null;
-  var currentGroupItems = [];
+  var currentGroupItems: Recording[] = [];
   state.recordings.forEach((item) => {
     const group = item.created_at.toDateString();
     if(currentGroup === group) {
@@ -105,27 +144,45 @@ function RecordingsList() {
       });
     }
   });
-
-  if(otherGroup.length > 0) {
-    groups.push({
-      title: "Other",
-      items: otherGroup,
-    });
-  }
-
+  
   return (
     <>
-      <Modal show={showConfirmDelete} onHide={handleClose}>
+      <Modal show={showConfirmDelete} onHide={handleCloseDelete}>
         <Modal.Header closeButton>
           <Modal.Title>Confirm deletion</Modal.Title>
         </Modal.Header>
         <Modal.Body>Delete recording {itemToDelete}?</Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={handleClose}>
+          <Button variant="secondary" onClick={handleCloseDelete}>
             Cancel
           </Button>
           <Button variant="danger" onClick={handleDelete}>
             Delete
+          </Button>
+        </Modal.Footer>
+      </Modal>
+      
+      <Modal show={showConfirmRename} onHide={handleCloseRename}>
+        <Modal.Header closeButton>
+          <Modal.Title>Rename recording</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <input
+            ref={renameInput}
+            placeholder="Enter name here"
+            type="text"
+            className="form-control"
+            onKeyUp={handleRenameKeyUp}
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            />
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseRename}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleRename}>
+            Rename
           </Button>
         </Modal.Footer>
       </Modal>
@@ -157,7 +214,9 @@ function RecordingsList() {
                   : (state.playingRecording === item.id ? PlayingState.Playing : PlayingState.Stopped)}
                 onPlay={() => actions.playRecording(dispatch, item.id)}
                 onStop={() => actions.stopPlaying(dispatch)}
-                onRequestDelete={() => confirmDelete(item.id)} />
+                onRequestDelete={() => confirmDelete(item.id)}
+                onRequestRename={() => confirmRename(item.id)}
+                />
             </ListGroup.Item>
           ))}
           </ListGroup>
@@ -172,10 +231,11 @@ type RecordingItemProps = {
   onPlay: () => void,
   onStop: () => void,
   onRequestDelete: () => void,
+  onRequestRename: () => void,
 };
 
 const RecordingItem = React.memo((props: RecordingItemProps) => {
-  function button() {
+  function playControlButton() {
     switch (props.playingState) {
       case PlayingState.Pending:
         return (<Button variant="outline-primary" disabled><Spinner size="sm" animation="border" /></Button>)
@@ -187,17 +247,30 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
   }
   return (
     <Stack direction='horizontal'>
-      <div className="text-truncate">{props.recording.name || props.recording.created_at.toLocaleTimeString()}</div>
-      {
-        props.playingState === PlayingState.Playing
-          ? <VolumeUp className="ms-2" size="1.5em" color="gray" />
-          : <></>
-      }
-      <div className="ms-auto"></div>
+      <Stack direction='vertical' className="mx-auto">
+        <Stack direction='horizontal'>
+          <div aria-label="Click to Rename" onClick={props.onRequestRename}>
+          {
+            props.recording.name
+              ? (<span className="text-truncate">{props.recording.name}</span>)
+              : (<span className="text-truncate text-italic">Unnamed</span>)
+          }
+          </div>
+          {
+            props.playingState === PlayingState.Playing
+              ? <VolumeUp className="ms-2" size="1.5em" color="gray" />
+              : <></>
+          }
+        </Stack>
+        <Stack direction='horizontal'>
+          <div className="text-truncate text-muted text-smaller">{props.recording.created_at.toLocaleTimeString()}</div>
+        </Stack>
+      </Stack>
       <Button onClick={props.onRequestDelete} variant="outline-danger" className="me-2"><Trash /></Button>
-      {button()}
+      {playControlButton()}
     </Stack>
   );
+  //<Button onClick={props.onRequestDelete} variant="outline-primary" className="me-2"><Pencil /></Button>
 });
 
 
@@ -210,7 +283,6 @@ function ErrorBanner() {
     </Alert>
   ) : <></>
 }
-
 
 
 function Toolbar({ className }: { className: string }) {
