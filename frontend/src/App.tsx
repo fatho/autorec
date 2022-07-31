@@ -132,7 +132,9 @@ function RecordingsList() {
   var currentGroup = null as string | null;
   var currentGroupItems: Recording[] = [];
   state.recordings.forEach((item) => {
-    const group = item.created_at.toDateString();
+    const group = item.created_at.toLocaleDateString(undefined, {
+      weekday: 'short', year: 'numeric', month: 'long', day: 'numeric'
+    });
     if(currentGroup === group) {
       currentGroupItems.push(item);
     } else {
