@@ -8,7 +8,7 @@ pub struct Config {
     pub web: WebConfig,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub data_directory: PathBuf,
     pub midi_device: String,

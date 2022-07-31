@@ -3,11 +3,11 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use tracing::{info, trace};
 
 use crate::{
-    app::App,
+    app::Shared,
     midi::{self, RecordEvent},
 };
 
-pub async fn run_recorder(app: Arc<App>, mut recorder: midi::Recorder) -> color_eyre::Result<()> {
+pub async fn run_recorder(app: Arc<Shared>, mut recorder: midi::Recorder) -> color_eyre::Result<()> {
     loop {
         info!("Waiting for song to start");
         let event = recorder.next().await?;

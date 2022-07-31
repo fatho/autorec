@@ -62,6 +62,7 @@ pub enum MidiEvent {
     // TODO: do we need more?
 }
 
+#[derive(Debug)]
 pub struct Manager {
     registry: alsa_backend::MidiRegistry,
 }
@@ -90,3 +91,61 @@ impl Manager {
 
 pub type DeviceListener = alsa_backend::DeviceListener;
 pub type Recorder = alsa_backend::MidiRecorder;
+
+pub fn encode_midi_file(events: Vec<RecordEvent>) -> Vec<u8> {
+    let mut smf = midly::Smf::new(midly::Header::new(
+        midly::Format::SingleTrack,
+        midly::Timing::Metrical(midly::num::u15::new(96)),
+    ));
+    let mut track = Vec::new();
+    let mut last_time = events.first().map_or(0, |rev| rev.timestamp);
+
+    for event in events.iter() {
+        let delta = event.timestamp - last_time;
+        last_time = event.timestamp;
+
+        track.push(midly::TrackEvent {
+            delta: midly::num::u28::new(delta),
+            kind: match event.payload {
+                MidiEvent::NoteOn {
+                    channel,
+                    note,
+                    velocity,
+                } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::NoteOn {
+                        key: note.into(),
+                        vel: velocity.into(),
+                    },
+                },
+                MidiEvent::NoteOff { channel, note } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::NoteOff {
+                        key: note.into(),
+                        vel: 0.into(),
+                    },
+                },
+                MidiEvent::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                } => midly::TrackEventKind::Midi {
+                    channel: channel.into(),
+                    message: midly::MidiMessage::Controller {
+                        controller: (controller as u8).into(),
+                        value: (value as u8).into(),
+                    },
+                },
+            },
+        })
+    }
+    track.push(midly::TrackEvent {
+        delta: 0.into(),
+        kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+    });
+    smf.tracks.push(track);
+
+    let mut midi_data = vec![];
+    smf.write_std(&mut midi_data).expect("writing to vec doesn't fail");
+    midi_data
+}

@@ -41,6 +41,7 @@ pub struct RecordingEntry {
     pub created_at: chrono::DateTime<Utc>,
 }
 
+#[derive(Debug)]
 pub struct RecordingStore {
     directory: PathBuf,
     pool: SqlitePool,
@@ -92,7 +93,10 @@ impl RecordingStore {
         Ok(())
     }
 
-    pub async fn insert_recording(&self, filename: &Path) -> color_eyre::Result<RecordingEntry> {
+    pub async fn insert_recording(&self, filename: &Path, midi_data: Vec<u8>) -> color_eyre::Result<RecordingEntry> {
+        let path = self.directory.join(filename);
+        std::fs::write(path, midi_data)?;
+
         let filename_utf8 = filename
             .to_str()
             .ok_or(color_eyre::eyre::eyre!("Path must be a valid string"))?;

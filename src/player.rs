@@ -4,13 +4,14 @@
 //! Eventually, it would be nice to have a working implementation to talk directly to the platform's
 //! MIDI API. Unfortunately, this isn't entirely trivial within `tokio`.
 
-use std::{pin::Pin, process::Stdio};
+use std::{pin::Pin, process::Stdio, sync::Arc};
 
 use lazy_static::lazy_static;
-use tokio::{select, sync::oneshot};
+use tokio::{select, sync::{oneshot, broadcast, Mutex}, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
+#[derive(Debug)]
 pub struct MidiPlayer {
     cancellation_token: CancellationToken,
 }
@@ -114,5 +115,86 @@ async fn reset_output(output: &str) {
         let stdin = reset_cmd.stdin.take().unwrap();
         feed_aplaymidi(stdin, source).await;
         let _ = reset_cmd.wait().await;
+    }
+}
+
+#[derive(Debug)]
+pub struct MidiPlayQueue<T> {
+    shared: Arc<Mutex<QueueShared<T>>>,
+    player: Option<(MidiPlayer, JoinHandle<()>)>,
+    tx: Arc<broadcast::Sender<QueueEvent<T>>>,
+}
+
+#[derive(Debug)]
+struct QueueShared<T> {
+    current: Option<T>,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueueEvent<T> {
+    PlaybackStart(T),
+    PlaybackStop(T),
+}
+
+impl<T: Clone + Send + 'static> MidiPlayQueue<T> {
+    pub fn new() -> Self {
+        let (tx, _rx) = broadcast::channel(16);
+
+        Self {
+            shared: Arc::new(Mutex::new(QueueShared { current: None })),
+            player: None,
+            tx: Arc::new(tx),
+        }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<QueueEvent<T>> {
+        self.tx.subscribe()
+    }
+
+    pub async fn play(&mut self, token: T, output: String, source: Pin<Box<dyn tokio::io::AsyncRead + Send>>) -> std::io::Result<()> {
+        if let Some((player, waiter)) = self.player.take() {
+            player.stop();
+            let _ = waiter.await;
+        }
+
+        let (player, completed) = MidiPlayer::new(output, source).await?;
+
+        let _ = self.tx.send(QueueEvent::PlaybackStart(token.clone()));
+
+        {
+            let mut state = self.shared.lock().await;
+            state.current = Some(token.clone());
+        }
+
+        let waiter = tokio::spawn({
+            let tx = self.tx.clone();
+            let shared = self.shared.clone();
+            async move {
+                // Wait for player process to stop
+                let _ = completed.await;
+                {
+                    let mut state = shared.lock().await;
+                    state.current = None;
+                }
+                // Ignore errors, we don't care if anyone listens
+                let _ = tx.send(QueueEvent::PlaybackStop(token));
+            }
+        });
+
+        self.player = Some((player, waiter));
+
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) {
+        if let Some((player, waiter)) = self.player.take() {
+            player.stop();
+            let _ = waiter.await;
+        }
+    }
+
+    pub async fn current(&self) -> Option<T> {
+        let state = self.shared.lock().await;
+        state.current.clone()
     }
 }

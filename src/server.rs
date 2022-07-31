@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible};
 
 use axum::{
     extract::Path,
@@ -28,7 +28,7 @@ pub struct DeviceObject {
 
 // TODO: reinstate /devices endpoint
 // /// Return list of devices
-// pub async fn devices(app: Extension<Arc<App>>) -> Json<Vec<DeviceObject>> {
+// pub async fn devices(app: Extension<App>) -> Json<Vec<DeviceObject>> {
 //     let result = app
 //         .state()
 //         .devices
@@ -60,7 +60,7 @@ impl RecInfo {
 }
 
 /// Return list of recordings
-pub async fn get_recordings(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
+pub async fn get_recordings(app: Extension<App>) -> Json<Vec<RecInfo>> {
     let songs = app.query_recordings().await.map_or_else(
         |err| {
             error!("Failed to list songs: {}", err);
@@ -74,11 +74,11 @@ pub async fn get_recordings(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
 
 /// Delete a recording
 pub async fn delete_recording(
-    app: Extension<Arc<App>>,
+    app: Extension<App>,
     Path((recording_id,)): Path<(RecordingId,)>,
-) -> Json<()> {
-    app.delete_recording(recording_id).await;
-    Json(())
+) -> Result<Json<()>, AppError> {
+    app.delete_recording(recording_id).await?;
+    Ok(Json(()))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -91,6 +91,12 @@ pub struct AppError {
     message: String,
 }
 
+impl From<color_eyre::eyre::ErrReport> for AppError {
+    fn from(err: color_eyre::eyre::ErrReport) -> Self {
+        AppError { message: err.to_string() }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::INTERNAL_SERVER_ERROR, self.message).into_response()
@@ -99,21 +105,21 @@ impl IntoResponse for AppError {
 
 #[axum_macros::debug_handler]
 pub async fn play(
-    app: Extension<Arc<App>>,
+    app: Extension<App>,
     Json(request): Json<PlayRequest>,
 ) -> Result<Json<()>, AppError> {
-    app.play_recording(request.id).await;
+    app.play_recording(request.id).await?;
     Ok(Json(()))
 }
 
 #[axum_macros::debug_handler]
-pub async fn stop(app: Extension<Arc<App>>, Json(()): Json<()>) -> Json<()> {
+pub async fn stop(app: Extension<App>, Json(()): Json<()>) -> Json<()> {
     app.stop_playing().await;
     Json(())
 }
 
-pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<RecordingId>> {
-    Json(app.playing_recording())
+pub async fn play_status(app: Extension<App>) -> Json<Option<RecordingId>> {
+    Json(app.playing_recording().await)
 }
 
 #[derive(Serialize)]
@@ -150,7 +156,7 @@ impl UpdateEvent {
     }
 }
 
-pub async fn updates_sse(app: Extension<Arc<App>>) -> impl IntoResponse {
+pub async fn updates_sse(app: Extension<App>) -> impl IntoResponse {
     let mut events = app.subscribe();
 
     let source = async_stream::stream! {
