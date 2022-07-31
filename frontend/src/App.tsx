@@ -6,7 +6,7 @@ import './App.css';
 import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash } from 'react-bootstrap-icons';
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
-import { PlayingState } from './App/State';
+import { PlayingState, Recording, RecordingId } from './App/State';
 import { Button, Alert, Spinner, ButtonToolbar, ButtonGroup, Navbar, Container, ListGroup, Stack, Modal, Nav, Offcanvas } from 'react-bootstrap';
 
 function App() {
@@ -70,37 +70,32 @@ function RecordingsList() {
   const { state, actions, dispatch } = useAppContext();
 
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState("");
+  const [itemToDelete, setItemToDelete] = useState(null as number | null);
 
   const handleClose = () => setShowConfirmDelete(false);
 
-  function confirmDelete(item: string) {
+  function confirmDelete(item: RecordingId) {
     setItemToDelete(item);
     setShowConfirmDelete(true);
   }
 
   // TEMP: until the backend provides more metadata, just group based on the naming scheme
   const groups = [];
-  const otherGroup = [] as string[];
+  const otherGroup = [] as Recording[];
 
   var currentGroup = null as string | null;
   var currentGroupItems = [];
   state.recordings.forEach((item) => {
-    const split = item.indexOf("-");
-    if(split > 0) {
-      const group = item.substring(0, split);
-      if(currentGroup === group) {
-        currentGroupItems.push(item);
-      } else {
-        currentGroup = group;
-        currentGroupItems = [item];
-        groups.push({
-          title: currentGroup,
-          items: currentGroupItems,
-        });
-      }
+    const group = item.created_at.toDateString();
+    if(currentGroup === group) {
+      currentGroupItems.push(item);
     } else {
-      otherGroup.push(item);
+      currentGroup = group;
+      currentGroupItems = [item];
+      groups.push({
+        title: currentGroup,
+        items: currentGroupItems,
+      });
     }
   });
 
@@ -147,15 +142,15 @@ function RecordingsList() {
               <b>{group.title}</b>
             </ListGroup.Item>
             {group.items.map(item => (
-            <ListGroup.Item key={item}>
+            <ListGroup.Item key={item.id}>
               <RecordingItem
                 recording={item}
-                playingState={state.playingState === PlayingState.Pending && state.playingQueued === item
+                playingState={state.playingState === PlayingState.Pending && state.playingQueued === item.id
                   ? PlayingState.Pending
-                  : (state.playingRecording === item ? PlayingState.Playing : PlayingState.Stopped)}
-                onPlay={() => actions.playRecording(dispatch, item)}
+                  : (state.playingRecording === item.id ? PlayingState.Playing : PlayingState.Stopped)}
+                onPlay={() => actions.playRecording(dispatch, item.id)}
                 onStop={() => actions.stopPlaying(dispatch)}
-                onRequestDelete={() => confirmDelete(item)} />
+                onRequestDelete={() => confirmDelete(item.id)} />
             </ListGroup.Item>
           ))}
           </ListGroup>
@@ -165,7 +160,7 @@ function RecordingsList() {
 }
 
 type RecordingItemProps = {
-  recording: string,
+  recording: Recording,
   playingState: PlayingState,
   onPlay: () => void,
   onStop: () => void,
@@ -185,7 +180,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
   }
   return (
     <Stack direction='horizontal'>
-      <div className="text-truncate">{props.recording}</div>
+      <div className="text-truncate">{props.recording.name || props.recording.created_at.toLocaleTimeString()}</div>
       {
         props.playingState === PlayingState.Playing
           ? <VolumeUp className="ms-2" size="1.5em" color="gray" />

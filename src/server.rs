@@ -8,12 +8,16 @@ use axum::{
     },
     Extension, Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tracing::error;
 
-use crate::app::{App, RecordingId, StateChange};
+use crate::{
+    app::{App, StateChange},
+    store::{RecordingEntry, RecordingId},
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct DeviceObject {
@@ -37,20 +41,39 @@ pub struct DeviceObject {
 //     Json(result)
 // }
 
+#[derive(Serialize)]
+pub struct RecInfo {
+    pub id: RecordingId,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl RecInfo {
+    pub fn new(entry: RecordingEntry) -> Self {
+        RecInfo {
+            id: entry.id,
+            name: entry.name.clone(),
+            created_at: entry.created_at,
+        }
+    }
+}
+
 /// Return list songs
-pub async fn songs(app: Extension<Arc<App>>) -> Json<Vec<String>> {
-    let mut songs = app.query_songs().unwrap_or_else(|err| {
-        error!("Failed to list songs: {}", err);
-        vec![]
-    });
-    songs.sort_by(|a, b| b.cmp(a));
+pub async fn songs(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
+    let songs = app.query_songs().await.map_or_else(
+        |err| {
+            error!("Failed to list songs: {}", err);
+            vec![]
+        },
+        |songs| songs.into_iter().map(RecInfo::new).collect(),
+    );
 
     Json(songs)
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PlayRequest {
-    name: String,
+    id: RecordingId,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -69,7 +92,7 @@ pub async fn play(
     app: Extension<Arc<App>>,
     Json(request): Json<PlayRequest>,
 ) -> Result<Json<()>, AppError> {
-    app.play_recording(RecordingId(request.name)).await;
+    app.play_recording(request.id).await;
     Ok(Json(()))
 }
 
@@ -79,17 +102,17 @@ pub async fn stop(app: Extension<Arc<App>>, Json(()): Json<()>) -> Json<()> {
     Json(())
 }
 
-pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<String>> {
-    Json(app.playing_recording().map(|rec| rec.0))
+pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<RecordingId>> {
+    Json(app.playing_recording())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(tag = "type")]
 pub enum UpdateEvent {
     RecordBegin,
-    RecordEnd { recording: String },
+    RecordEnd { recording: RecInfo },
     RecordError { message: String },
-    PlayBegin { recording: String },
+    PlayBegin { recording: RecordingId },
     PlayError { message: String },
     PlayEnd,
 }
@@ -97,15 +120,15 @@ pub enum UpdateEvent {
 impl UpdateEvent {
     pub fn from_state_change(change: StateChange) -> Option<UpdateEvent> {
         match change {
-            StateChange::ListenBegin { device, info } => None,
+            StateChange::ListenBegin { .. } => None,
             StateChange::ListenEnd => None,
             StateChange::RecordBegin => Some(UpdateEvent::RecordBegin),
             StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd {
-                recording: recording.0,
+                recording: RecInfo::new(recording),
             }),
             StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
-                recording: recording.0,
+                recording: recording,
             }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
             StateChange::PlayError { message } => Some(UpdateEvent::PlayError { message }),

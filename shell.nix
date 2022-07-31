@@ -20,6 +20,9 @@ in
       # Nix tools
       niv
 
+      # SQLite tools
+      sqlite-interactive
+
       # NodeJS for frontend stuff
       nodejs
       nodePackages.svgo

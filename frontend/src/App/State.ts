@@ -12,14 +12,26 @@ enum ActionType {
     PlayStateFailed,
 }
 
-type Recording = string;
+type RecordingId = number;
+
+type Recording = {
+    id: RecordingId,
+    name: string,
+    created_at: Date,
+};
+
+type WireRecording = {
+    id: RecordingId,
+    name: string,
+    created_at: string,
+};
 
 type Action = {
     type: ActionType,
-    recordings?: Array<Recording>,
-    recording?: Recording,
+    recordings?: Array<WireRecording>,
+    recording?: WireRecording,
     errorMessage?: string,
-    playing?: string | null,
+    playing?: RecordingId | null,
 }
 
 enum PlayingState {
@@ -36,8 +48,8 @@ type AppState = {
     errorMessage: string,
 
     playingState: PlayingState,
-    playingRecording: string | null,
-    playingQueued: string | null,
+    playingRecording: RecordingId | null,
+    playingQueued: RecordingId | null,
 
     isRecording: boolean,
 };
@@ -102,7 +114,7 @@ const actions = {
         }
     },
 
-    playRecording: async (dispatch: ActionDispatch, recording: string) => {
+    playRecording: async (dispatch: ActionDispatch, recording: number) => {
         dispatch({ type: ActionType.PlayControlPending, playing: recording });
         try {
             const response = await fetch("/play", {
@@ -110,7 +122,7 @@ const actions = {
               headers: {
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ "name": recording })
+              body: JSON.stringify({ "id": recording })
             });
             await checkForStatus(response);
         } catch (e) {
@@ -145,7 +157,7 @@ function reducer(state: AppState, action: Action): AppState {
         case ActionType.QueryRecordingsSucceeded:
             return {
                 ...state,
-                recordings: action.recordings!,
+                recordings: action.recordings!.map(parseRecording),
                 recordingsLoading: false,
                 error: false,
                 errorMessage: "",
@@ -167,7 +179,7 @@ function reducer(state: AppState, action: Action): AppState {
         case ActionType.RecordEnd:
             return {
                 ...state,
-                recordings: [action.recording!, ...state.recordings],
+                recordings: [parseRecording(action.recording!), ...state.recordings],
                 isRecording: false,
             }
         case ActionType.RecordError:
@@ -204,6 +216,13 @@ function reducer(state: AppState, action: Action): AppState {
     }
 }
 
+function parseRecording(wire: WireRecording): Recording {
+    return {
+        id: wire.id,
+        name: wire.name,
+        created_at: new Date(wire.created_at),
+    }
+}
 
 
 export {
@@ -211,8 +230,12 @@ export {
     reducer,
     actions,
 
+    type Recording,
+    type RecordingId,
+
     type ActionDispatch,
     type Action,
+    type WireRecording,
     ActionType,
 
     PlayingState,

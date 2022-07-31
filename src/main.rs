@@ -21,6 +21,7 @@ mod midi;
 mod player;
 mod recorder;
 mod server;
+mod store;
 
 /// Program to automatically start MIDI recordings of songs played on an attached MIDI device.
 #[derive(Parser, Debug)]
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
     let config = toml::from_str::<config::Config>(&config_toml).context("parsing config file")?;
 
     // Initialize state
-    let app = app::App::new(config.app)?;
+    let app = app::App::new(config.app).await?;
 
     // Allow for graceful shutdowns (only catches SIGINT - not SIGTERM)
     let exit_signal = tokio::signal::ctrl_c();

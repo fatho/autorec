@@ -1,12 +1,18 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
 use crate::{
     config::AppConfig,
-    midi::{self, Device, DeviceInfo, RecordEvent, MidiEvent}, recorder, player,
+    midi::{self, Device, DeviceInfo, MidiEvent, RecordEvent},
+    player, recorder,
+    store::{RecordingEntry, RecordingId, RecordingStore},
 };
 
+use color_eyre::eyre::bail;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{info, error};
+use tracing::{error, info};
 
 pub struct State {
     listening_device: Option<Device>,
@@ -21,12 +27,15 @@ pub struct App {
     change_tx: broadcast::Sender<StateChange>,
     app_tx: mpsc::Sender<AppEvent>,
     midi: midi::Manager,
+    store: RecordingStore,
 }
 
 impl App {
-    pub fn new(config: AppConfig) -> color_eyre::Result<Arc<Self>> {
+    pub async fn new(config: AppConfig) -> color_eyre::Result<Arc<Self>> {
         let (app_tx, app_rx) = mpsc::channel::<AppEvent>(16);
         let (change_tx, _) = broadcast::channel::<StateChange>(16);
+
+        let store = RecordingStore::open(&config.data_directory).await?;
 
         let state = RwLock::new(State {
             listening_device: None,
@@ -44,6 +53,7 @@ impl App {
             change_tx,
             midi,
             app_tx,
+            store,
         });
 
         // TODO: provide way to listen for failures of these threads
@@ -63,20 +73,8 @@ impl App {
         self.change_tx.subscribe()
     }
 
-    pub fn query_songs(&self) -> std::io::Result<Vec<String>> {
-        let mut songs = Vec::new();
-
-        for song in std::fs::read_dir(&self.config.data_directory)? {
-            if let Some(name) = song?
-                .file_name()
-                .to_str()
-                .and_then(|name| name.strip_suffix(".mid"))
-            {
-                songs.push(name.to_owned())
-            }
-        }
-
-        Ok(songs)
+    pub async fn query_songs(&self) -> color_eyre::Result<Vec<RecordingEntry>> {
+        self.store.get_recordings().await
     }
 
     pub async fn play_recording(&self, recording: RecordingId) {
@@ -158,14 +156,25 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                 app.notify(StateChange::RecordBegin);
             }
             AppEvent::RecordingDone { events } => {
-
-                let name = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+                let name = chrono::Local::now().format("%Y%m%d-%H%M%S.mid").to_string();
                 if let Err(err) = store_recording(&app, &name, events) {
                     error!("Failed to save song '{}': {}", name, err);
-                    app.notify(StateChange::RecordError { message: err.to_string() });
-                } else {
-                    info!("Recorded song '{}'", name);
-                    app.notify(StateChange::RecordEnd { recording: RecordingId(name) });
+                    app.notify(StateChange::RecordError {
+                        message: err.to_string(),
+                    });
+                    continue;
+                }
+                match app.store.insert_recording(Path::new(name.as_str())).await {
+                    Ok(recording) => {
+                        info!("Recorded song '{}' with id {}", name, recording.id.0);
+                        app.notify(StateChange::RecordEnd { recording });
+                    }
+                    Err(err) => {
+                        error!("Failed to register song '{}': {}", name, err);
+                        app.notify(StateChange::RecordError {
+                            message: err.to_string(),
+                        });
+                    }
                 }
             }
             AppEvent::PlayerStart { recording } => {
@@ -183,16 +192,20 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
 
                 match play_recording(&app, playback_device, recording.clone()).await {
                     Ok(player) => {
-                        app.notify(StateChange::PlayBegin { recording: recording.clone() });
+                        app.notify(StateChange::PlayBegin {
+                            recording: recording.clone(),
+                        });
 
                         let mut state = app.state.write().unwrap();
                         state.player = Some(player);
                         state.player_current = Some(recording);
-                    },
+                    }
                     Err(err) => {
-                        app.notify(StateChange::PlayError { message: err.to_string() });
+                        app.notify(StateChange::PlayError {
+                            message: err.to_string(),
+                        });
                         error!("Failed to play recording {}: {}", recording.0, err)
-                    },
+                    }
                 }
             }
             AppEvent::PlayerRequestStop => {
@@ -205,21 +218,28 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                 let (playback_device, queued) = {
                     let mut state = app.state.write().unwrap();
 
-                    (state.listening_device.as_ref().map(|dev| dev.id()), state.player_queued.take())
+                    (
+                        state.listening_device.as_ref().map(|dev| dev.id()),
+                        state.player_queued.take(),
+                    )
                 };
                 if let Some(queued) = queued {
                     match play_recording(&app, playback_device, queued.clone()).await {
                         Ok(player) => {
-                            app.notify(StateChange::PlayBegin { recording: queued.clone() });
+                            app.notify(StateChange::PlayBegin {
+                                recording: queued.clone(),
+                            });
 
                             let mut state = app.state.write().unwrap();
                             state.player = Some(player);
                             state.player_current = Some(queued);
-                        },
+                        }
                         Err(err) => {
-                            app.notify(StateChange::PlayError { message: err.to_string() });
+                            app.notify(StateChange::PlayError {
+                                message: err.to_string(),
+                            });
                             error!("Failed to play recording {}: {}", queued.0, err)
-                        },
+                        }
                     }
                 } else {
                     let mut state = app.state.write().unwrap();
@@ -232,11 +252,17 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
     }
 }
 
-async fn play_recording(app: &Arc<App>, device: Option<String>, recording: RecordingId) -> std::io::Result<player::MidiPlayer> {
+async fn play_recording(
+    app: &Arc<App>,
+    device: Option<String>,
+    recording: RecordingId,
+) -> color_eyre::Result<player::MidiPlayer> {
     if let Some(output) = device {
         info!("Playing {}", recording.0);
 
-        let reader = open_recording(app, &recording).await?;
+        let entry = app.store.get_recording_by_id(recording).await?;
+
+        let reader = open_recording(app, &entry.filename).await?;
 
         let (player, notifier) = player::MidiPlayer::new(output, Box::pin(reader)).await?;
         tokio::spawn({
@@ -248,15 +274,12 @@ async fn play_recording(app: &Arc<App>, device: Option<String>, recording: Recor
         });
         Ok(player)
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "No device for playing song",
-        ))
+        bail!("No device for playing song")
     }
 }
+
 pub fn store_recording(app: &App, name: &str, events: Vec<RecordEvent>) -> std::io::Result<()> {
-    let mut filepath = app.config.data_directory.join(name);
-    filepath.set_extension("mid");
+    let filepath = app.config.data_directory.join(name);
 
     let mut smf = midly::Smf::new(midly::Header::new(
         midly::Format::SingleTrack,
@@ -313,10 +336,8 @@ pub fn store_recording(app: &App, name: &str, events: Vec<RecordEvent>) -> std::
     smf.save(filepath)
 }
 
-
-async fn open_recording(app: &Arc<App>, recording: &RecordingId) -> std::io::Result<tokio::fs::File> {
-    let mut filepath = app.config.data_directory.join(&recording.0);
-    filepath.set_extension("mid");
+async fn open_recording(app: &Arc<App>, filename: &str) -> std::io::Result<tokio::fs::File> {
+    let filepath = app.config.data_directory.join(&filename);
 
     tokio::fs::File::open(filepath).await
 }
@@ -339,19 +360,23 @@ fn handle_new_device(app: &Arc<App>, device: Device, info: DeviceInfo) {
                 Ok(rec) => {
                     info!("Beginning recording on {}", device.id());
                     state.listening_device = Some(device.clone());
-                    app.notify(StateChange::ListenBegin { device: device.clone(), info });
+                    app.notify(StateChange::ListenBegin {
+                        device: device.clone(),
+                        info,
+                    });
 
                     let inner_app = app.clone();
                     tokio::spawn(async move {
-                        if let Err(err) =
-                            recorder::run_recorder(inner_app.clone(), rec).await
-                        {
+                        if let Err(err) = recorder::run_recorder(inner_app.clone(), rec).await {
                             error!("Recorder failed: {}", err)
                         } else {
                             info!("Recorder shut down");
                         }
                         // Notify app about stopping
-                        let _ = inner_app.app_tx.send(AppEvent::RecorderShutDown { device }).await;
+                        let _ = inner_app
+                            .app_tx
+                            .send(AppEvent::RecorderShutDown { device })
+                            .await;
                     });
                 }
                 Err(err) => {
@@ -367,10 +392,6 @@ fn handle_new_device(app: &Arc<App>, device: Device, info: DeviceInfo) {
         );
     }
 }
-
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RecordingId(pub String);
 
 /// Events controlling the application state.
 pub enum AppEvent {
@@ -406,7 +427,7 @@ pub enum StateChange {
     /// App starts recording
     RecordBegin,
     /// App stops recording (due to MIDI inactivity)
-    RecordEnd { recording: RecordingId },
+    RecordEnd { recording: RecordingEntry },
     /// Failed to record song
     RecordError { message: String },
     /// App starts playing back
