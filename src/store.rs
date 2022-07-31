@@ -196,6 +196,8 @@ async fn migrate_000_init(
     .execute(&mut *transaction)
     .await?;
 
+    let mut recordings = Vec::new();
+
     for recording in std::fs::read_dir(directory)? {
         if let Some(filename) = recording?.file_name().to_str() {
             if let Some(name) = filename.strip_suffix(".mid") {
@@ -215,17 +217,24 @@ async fn migrate_000_init(
                     );
 
                 debug!(
-                    "Found and inserting {} with timestamp {}",
+                    "Found {} with timestamp {}",
                     filename, created_at
                 );
 
-                sqlx::query("INSERT INTO recordings (filename, created_at) VALUES (?, ?)")
-                    .bind(filename)
-                    .bind(created_at)
-                    .execute(&mut *transaction)
-                    .await?;
+                recordings.push((created_at, filename.to_owned()));
             }
         }
+    }
+
+    // Sort to keep id's ascending in chronological order
+    recordings.sort();
+
+    for (created_at, filename) in recordings {
+        sqlx::query("INSERT INTO recordings (filename, created_at) VALUES (?, ?)")
+            .bind(filename)
+            .bind(created_at)
+            .execute(&mut *transaction)
+            .await?;
     }
 
     Ok(())
