@@ -31,6 +31,7 @@ in
     buildInputs = with nixpkgs; [
       pkg-config
       alsa-lib
+      sqlite
     ];
 
     # Always enable rust backtraces in development shell

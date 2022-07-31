@@ -7,6 +7,9 @@ enum ActionType {
     RecordEnd,
     RecordError,
 
+    RecordDelete,
+    RecordDeleteError,
+
     PlayControlPending,
     PlayStateUpdated,
     PlayStateFailed,
@@ -31,7 +34,7 @@ type Action = {
     recordings?: Array<WireRecording>,
     recording?: WireRecording,
     errorMessage?: string,
-    playing?: RecordingId | null,
+    recording_id?: RecordingId | null,
 }
 
 enum PlayingState {
@@ -93,12 +96,24 @@ const actions = {
     queryRecordings: async (dispatch: ActionDispatch) => {
         dispatch({ type: ActionType.QueryRecordingsPending });
         try {
-            const response = await fetch("/songs");
+            const response = await fetch("/recordings");
             await checkForStatus(response);
             const data = await response.json();
             dispatch({ type: ActionType.QueryRecordingsSucceeded, recordings: data });
         } catch (e) {
             dispatch({ type: ActionType.QueryRecordingsFailed, errorMessage: (e as object).toString() });
+        }
+    },
+
+    deleteRecording: async (dispatch: ActionDispatch, recording: RecordingId) => {
+        try {
+            const response = await fetch(`/recordings/${recording}`, {
+              method: "DELETE",
+            });
+            await checkForStatus(response);
+            dispatch({ type: ActionType.RecordDelete, recording_id: recording });
+        } catch (e) {
+            dispatch({ type: ActionType.RecordDeleteError, errorMessage: (e as object).toString() });
         }
     },
 
@@ -108,14 +123,14 @@ const actions = {
             const response = await fetch("/play-status");
             await checkForStatus(response);
             const data = await response.json();
-            dispatch({ type: ActionType.PlayStateUpdated, playing: data });
+            dispatch({ type: ActionType.PlayStateUpdated, recording_id: data });
         } catch (e) {
             dispatch({ type: ActionType.PlayStateFailed, errorMessage: (e as object).toString() });
         }
     },
 
-    playRecording: async (dispatch: ActionDispatch, recording: number) => {
-        dispatch({ type: ActionType.PlayControlPending, playing: recording });
+    playRecording: async (dispatch: ActionDispatch, recording: RecordingId) => {
+        dispatch({ type: ActionType.PlayControlPending, recording_id: recording });
         try {
             const response = await fetch("/play", {
               method: "POST",
@@ -131,7 +146,7 @@ const actions = {
     },
 
     stopPlaying: async (dispatch: ActionDispatch) => {
-        dispatch({ type: ActionType.PlayControlPending, playing: null });
+        dispatch({ type: ActionType.PlayControlPending, recording_id: null });
         try {
             const response = await fetch("/stop", {
               method: "POST",
@@ -189,18 +204,30 @@ function reducer(state: AppState, action: Action): AppState {
                 error: true,
                 errorMessage: action.errorMessage!,
             }
+
+        case ActionType.RecordDelete:
+            return {
+                ...state,
+                recordings: state.recordings.filter(rec => rec.id !== action.recording_id!)
+            }
+        case ActionType.RecordDeleteError:
+            return {
+                ...state,
+                error: true,
+                errorMessage: action.errorMessage!,
+            }
         
         case ActionType.PlayStateUpdated:
             return {
                 ...state,
-                playingRecording: action.playing!,
-                playingState: action.playing! ? PlayingState.Playing : PlayingState.Stopped,
+                playingRecording: action.recording_id!,
+                playingState: action.recording_id! ? PlayingState.Playing : PlayingState.Stopped,
             }
         case ActionType.PlayControlPending:
             return {
                 ...state,
                 playingState: PlayingState.Pending,
-                playingQueued: action.playing!,
+                playingQueued: action.recording_id!,
             }
         case ActionType.PlayStateFailed:
             return {

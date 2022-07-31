@@ -1,6 +1,7 @@
 use std::{convert::Infallible, sync::Arc};
 
 use axum::{
+    extract::Path,
     http::{HeaderValue, StatusCode},
     response::{
         sse::{Event, KeepAlive},
@@ -58,9 +59,9 @@ impl RecInfo {
     }
 }
 
-/// Return list songs
-pub async fn songs(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
-    let songs = app.query_songs().await.map_or_else(
+/// Return list of recordings
+pub async fn get_recordings(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
+    let songs = app.query_recordings().await.map_or_else(
         |err| {
             error!("Failed to list songs: {}", err);
             vec![]
@@ -69,6 +70,15 @@ pub async fn songs(app: Extension<Arc<App>>) -> Json<Vec<RecInfo>> {
     );
 
     Json(songs)
+}
+
+/// Delete a recording
+pub async fn delete_recording(
+    app: Extension<Arc<App>>,
+    Path((recording_id,)): Path<(RecordingId,)>,
+) -> Json<()> {
+    app.delete_recording(recording_id).await;
+    Json(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,6 +121,7 @@ pub async fn play_status(app: Extension<Arc<App>>) -> Json<Option<RecordingId>> 
 pub enum UpdateEvent {
     RecordBegin,
     RecordEnd { recording: RecInfo },
+    RecordDelete { recording_id: RecordingId },
     RecordError { message: String },
     PlayBegin { recording: RecordingId },
     PlayError { message: String },
@@ -132,6 +143,9 @@ impl UpdateEvent {
             }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
             StateChange::PlayError { message } => Some(UpdateEvent::PlayError { message }),
+            StateChange::RecordDelete { recording_id } => {
+                Some(UpdateEvent::RecordDelete { recording_id })
+            }
         }
     }
 }

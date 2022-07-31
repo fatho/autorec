@@ -73,8 +73,15 @@ impl App {
         self.change_tx.subscribe()
     }
 
-    pub async fn query_songs(&self) -> color_eyre::Result<Vec<RecordingEntry>> {
+    pub async fn query_recordings(&self) -> color_eyre::Result<Vec<RecordingEntry>> {
         self.store.get_recordings().await
+    }
+
+    pub async fn delete_recording(&self, recording: RecordingId) {
+        let _ = self
+            .app_tx
+            .send(AppEvent::DeleteRecording { recording })
+            .await;
     }
 
     pub async fn play_recording(&self, recording: RecordingId) {
@@ -248,8 +255,22 @@ async fn app_event_loop(app: Arc<App>, mut rx: mpsc::Receiver<AppEvent>) {
                     app.notify(StateChange::PlayEnd);
                 }
             }
+            AppEvent::DeleteRecording { recording } => {
+                if let Err(err) = delete_recording(&app, recording).await {
+                    error!("Failed to delete recording {}: {}", recording.0, err);
+                }
+            }
         }
     }
+}
+
+async fn delete_recording(app: &Arc<App>, id: RecordingId) -> color_eyre::Result<()> {
+    let rec = app.store.get_recording_by_id(id).await?;
+    app.store.delete_recording_by_id(id).await?;
+    let rec_file = app.config.data_directory.join(&rec.filename);
+    std::fs::remove_file(rec_file)?;
+    app.notify(StateChange::RecordDelete { recording_id: id });
+    Ok(())
 }
 
 async fn play_recording(
@@ -409,6 +430,9 @@ pub enum AppEvent {
     RecordingDone {
         events: Vec<RecordEvent>,
     },
+    DeleteRecording {
+        recording: RecordingId,
+    },
     /// Play the given recording (stops the playback of other recordings)
     PlayerStart {
         recording: RecordingId,
@@ -430,6 +454,8 @@ pub enum StateChange {
     RecordEnd { recording: RecordingEntry },
     /// Failed to record song
     RecordError { message: String },
+    /// A recording was deleted
+    RecordDelete { recording_id: RecordingId },
     /// App starts playing back
     PlayBegin { recording: RecordingId },
     /// Failed to start playback

@@ -1,7 +1,7 @@
 use axum::{
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, get_service, post},
+    routing::{delete, get, get_service, post},
     Extension, Router,
 };
 use clap::Parser;
@@ -53,7 +53,11 @@ async fn main() -> Result<()> {
         async move {
             let mut router = Router::new()
                 //.route("/devices", get(server::devices))
-                .route("/songs", get(server::songs))
+                .route("/recordings", get(server::get_recordings))
+                .route(
+                    "/recordings/:recording_id",
+                    delete(server::delete_recording),
+                )
                 .route("/play", post(server::play))
                 .route("/stop", post(server::stop))
                 .route("/play-status", get(server::play_status))

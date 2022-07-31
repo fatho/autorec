@@ -74,6 +74,13 @@ function RecordingsList() {
 
   const handleClose = () => setShowConfirmDelete(false);
 
+  function handleDelete() {
+    if(itemToDelete) {
+      actions.deleteRecording(dispatch, itemToDelete);
+    }
+    setShowConfirmDelete(false);
+  }
+
   function confirmDelete(item: RecordingId) {
     setItemToDelete(item);
     setShowConfirmDelete(true);
@@ -117,7 +124,7 @@ function RecordingsList() {
           <Button variant="secondary" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="danger" onClick={handleClose}>
+          <Button variant="danger" onClick={handleDelete}>
             Delete
           </Button>
         </Modal.Footer>

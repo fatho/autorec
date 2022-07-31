@@ -40,13 +40,13 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                         case "PlayBegin":
                             dispatch({
                                 type: State.ActionType.PlayStateUpdated,
-                                playing: data.recording,
+                                recording_id: data.recording,
                             });
                             break;
                         case "PlayEnd":
                             dispatch({
                                 type: State.ActionType.PlayStateUpdated,
-                                playing: null,
+                                recording_id: null,
                             });
                             break;
                         case "PlayError":
@@ -64,6 +64,12 @@ export const AppContextProvider = React.memo(({ children }: Props) => {
                             dispatch({
                                 type: State.ActionType.RecordEnd,
                                 recording: data.recording,
+                            });
+                            break;
+                        case "RecordDelete":
+                            dispatch({
+                                type: State.ActionType.RecordDelete,
+                                recording_id: data.recording_id,
                             });
                             break;
                         case "RecordError":

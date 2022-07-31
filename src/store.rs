@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, NaiveDateTime, TimeZone, Utc};
+use color_eyre::eyre::bail;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -9,7 +10,17 @@ use sqlx::{
 use tracing::{debug, info, warn};
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Decode, sqlx::Encode,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    sqlx::Decode,
+    sqlx::Encode,
 )]
 pub struct RecordingId(pub i32);
 
@@ -68,6 +79,17 @@ impl RecordingStore {
         .fetch_one(&self.pool)
         .await?;
         Ok(recording)
+    }
+
+    pub async fn delete_recording_by_id(&self, id: RecordingId) -> color_eyre::Result<()> {
+        let recording = sqlx::query("DELETE FROM recordings WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        if recording.rows_affected() == 0 {
+            bail!("No recording found with id {}", id.0)
+        }
+        Ok(())
     }
 
     pub async fn insert_recording(&self, filename: &Path) -> color_eyre::Result<RecordingEntry> {
