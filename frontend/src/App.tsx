@@ -250,7 +250,7 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
 
   function prettySeconds(total_seconds: number): string {
     let minutes = Math.floor(total_seconds / 60);
-    let seconds = total_seconds - minutes * 60;
+    let seconds = Math.round(total_seconds - minutes * 60);
     
     return `${minutes.toFixed(0)}:` + (seconds < 10 ? "0" : "") + `${seconds.toFixed(0)}`;
   }
