@@ -9,7 +9,7 @@ use sqlx::{
 };
 use tracing::{debug, info, warn};
 
-use crate::midi::{RECORDING_PPQ, RECORDING_TEMPO};
+use crate::midi::{RECORDING_PPQ, RECORDING_TEMPO, RECORDING_BPM};
 
 #[derive(
     Debug,
@@ -184,6 +184,7 @@ async fn migrate(pool: &SqlitePool, directory: &Path) -> color_eyre::Result<()> 
             Some(0) => {
                 migrate_001_inline_midi_storage_and_meta(&mut transaction, directory).await?
             }
+            Some(1) => migrate_002_fix_length_seconds(&mut transaction).await?,
             Some(_) => {
                 debug!("No more migrations");
                 break;
@@ -364,10 +365,21 @@ async fn migrate_001_inline_midi_storage_and_meta(
     Ok(())
 }
 
+/// Due to a bug, the length of a track in seconds was overestimated.
+async fn migrate_002_fix_length_seconds(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> color_eyre::Result<()> {
+    let res = sqlx::query("UPDATE recordings SET length_seconds = length_seconds * 96 / 120")
+        .execute(&mut *transaction)
+        .await?;
+    info!("Updated {} recordings", res.rows_affected());
+    Ok(())
+}
+
 fn compute_midi_stats(track: &midly::Track) -> (std::time::Duration, usize) {
     let length_ticks = track.iter().map(|event| event.delta.as_int()).sum::<u32>();
     let length = std::time::Duration::from_micros(
-        (length_ticks as u64) * 1000000 * 60 / (RECORDING_PPQ as u64 * RECORDING_PPQ as u64),
+        (length_ticks as u64) * 1000000 * 60 / (RECORDING_BPM as u64 * RECORDING_PPQ as u64),
     );
     let note_count = track
         .iter()
