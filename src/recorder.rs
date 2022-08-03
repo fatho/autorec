@@ -15,9 +15,14 @@ pub async fn run_recorder(app: Arc<Shared>, mut recorder: midi::Recorder) -> col
         if let Some(event) = event {
             app.start_recording().await;
 
-            let song = record_song(event, &mut recorder).await?;
+            let (song, stop_reason) = record_song(event, &mut recorder).await?;
 
             app.finish_recording(song).await;
+
+            if let StopReason::Disconnect = stop_reason {
+                info!("Recording device has been disconnected");
+                break;
+            }
         } else {
             break;
         }
@@ -25,10 +30,18 @@ pub async fn run_recorder(app: Arc<Shared>, mut recorder: midi::Recorder) -> col
     Ok(())
 }
 
+/// Describes what caused the end of the recording.
+pub enum StopReason {
+    /// Pianist was idle for too long
+    Idle,
+    /// Device got disconnected/turned off
+    Disconnect,
+}
+
 pub async fn record_song(
     mut first_event: RecordEvent,
     recorder: &mut midi::Recorder,
-) -> color_eyre::Result<Vec<RecordEvent>> {
+) -> color_eyre::Result<(Vec<RecordEvent>, StopReason)> {
     info!("Song started");
 
     // Keeping track of keyboard state for idle-detection
@@ -46,7 +59,7 @@ pub async fn record_song(
     let mut events = vec![first_event];
 
     // Keep recording until idle
-    loop {
+    let stop_reason = loop {
         match tokio::time::timeout(IDLE_TIMEOUT, recorder.next()).await {
             Ok(event) => {
                 if let Some(mut event) = event? {
@@ -64,23 +77,23 @@ pub async fn record_song(
                     );
                     events.push(event);
                 } else {
-                    break;
+                    break StopReason::Disconnect;
                 }
             }
             Err(_elapsed) => {
                 if keyboard_state.is_idle() {
-                    break;
+                    break StopReason::Idle;
                 } else {
                     idle_periods += 1;
 
                     // Emergency shutoff (in case state got corrupted)
                     if idle_periods >= MAX_IDLE_PERIODS {
-                        break;
+                        break StopReason::Idle;
                     }
                 }
             }
         }
-    }
+    };
     // Ticks are already normalized here
     let last_tick = events
         .last()
@@ -94,7 +107,7 @@ pub async fn record_song(
     );
 
     // TODO: stream events to disk - do not keep them in memory
-    Ok(events)
+    Ok((events, stop_reason))
 }
 
 struct KeyboardState {

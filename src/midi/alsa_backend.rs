@@ -388,7 +388,8 @@ impl MidiRecorder {
             }
             Ok(alsa_event)
         } else {
-            panic!("called next after recording ended")
+            // Once the device got disconnected, just continue to return None.
+            Ok(None)
         }
     }
 }
