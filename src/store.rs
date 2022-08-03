@@ -59,7 +59,7 @@ impl RecordingStore {
             .journal_mode(SqliteJournalMode::Delete);
         let pool = SqlitePoolOptions::new().connect_with(conn_opts).await?;
 
-        migrate(&pool, &directory).await?;
+        migrate(&pool, directory).await?;
 
         Ok(Self { pool })
     }
@@ -324,7 +324,7 @@ async fn migrate_001_inline_midi_storage_and_meta(
 
         if let Some(track) = midi.tracks.first() {
             // Our MIDI files should have just a single track
-            let (length, note_count) = compute_midi_stats(&track);
+            let (length, note_count) = compute_midi_stats(track);
 
             debug!("Updating entry for {id:?}");
             let result = sqlx::query(

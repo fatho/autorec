@@ -165,7 +165,7 @@ impl UpdateEvent {
             }),
             StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
-                recording: recording,
+                recording,
             }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
             StateChange::RecordDelete { recording_id } => {

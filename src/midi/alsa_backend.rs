@@ -416,8 +416,8 @@ mod internal {
 
     /// Check whether the given port is suitable as a source for autorec.
     pub fn is_port_readable_midi_addr(seq: &alsa::seq::Seq, addr: Addr) -> bool {
-        if let Some(client) = seq.get_any_client_info(addr.client).ok() {
-            if let Some(port) = seq.get_any_port_info(addr).ok() {
+        if let Ok(client) = seq.get_any_client_info(addr.client) {
+            if let Ok(port) = seq.get_any_port_info(addr) {
                 return is_port_readable_midi(&client, &port);
             }
         }
@@ -425,10 +425,10 @@ mod internal {
     }
 
     pub fn get_readable_midi_ports(seq: &alsa::seq::Seq) -> impl Iterator<Item = Addr> + '_ {
-        alsa::seq::ClientIter::new(&seq).flat_map(move |client| {
+        alsa::seq::ClientIter::new(seq).flat_map(move |client| {
             let client_id = client.get_client();
 
-            alsa::seq::PortIter::new(&seq, client_id).filter_map(move |port| {
+            alsa::seq::PortIter::new(seq, client_id).filter_map(move |port| {
                 if is_port_readable_midi(&client, &port) {
                     Some(Addr {
                         client: client_id,
@@ -446,11 +446,11 @@ mod internal {
             client_name: seq
                 .get_any_client_info(addr.client)
                 .and_then(|c| c.get_name().map(String::from))
-                .unwrap_or(String::new()),
+                .unwrap_or_default(),
             port_name: seq
                 .get_any_port_info(addr)
                 .and_then(|p| p.get_name().map(String::from))
-                .unwrap_or(String::new()),
+                .unwrap_or_default(),
         }
     }
 }

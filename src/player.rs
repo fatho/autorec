@@ -28,16 +28,17 @@ lazy_static!(
             // Timing doesn't matter since we just send a single message
             midly::Timing::Metrical(midly::num::u15::new(96)),
         ));
-        let mut track = Vec::new();
-        track.push(midly::TrackEvent {
-            delta: 0.into(),
-            // `GM Reset` message
-            kind: midly::TrackEventKind::SysEx(&[0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7]),
-        });
-        track.push(midly::TrackEvent {
-            delta: 0.into(),
-            kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
-        });
+        let track = vec![
+            midly::TrackEvent {
+                delta: 0.into(),
+                // `GM Reset` message
+                kind: midly::TrackEventKind::SysEx(&[0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7]),
+            },
+            midly::TrackEvent {
+                delta: 0.into(),
+                kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+            }
+        ];
         smf.tracks.push(track);
 
         let mut output = Vec::new();
@@ -105,7 +106,7 @@ async fn spawn_aplaymidi(output: &str, delay: u32) -> std::io::Result<tokio::pro
 async fn feed_aplaymidi(
     mut stdin: tokio::process::ChildStdin,
     mut source: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-) -> () {
+) {
     match tokio::io::copy(&mut source, &mut stdin).await {
         Ok(count) => debug!("Played {count} MIDI bytes"),
         Err(err) => {
