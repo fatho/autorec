@@ -43,30 +43,34 @@ pub struct DeviceObject {
 // }
 
 #[derive(Serialize)]
-pub struct RecInfo {
+pub struct ClientRecordingInfo {
     pub id: RecordingId,
     pub name: String,
     pub created_at: DateTime<Utc>,
+    pub length_seconds: f64,
+    pub note_count: u32,
 }
 
-impl From<RecordingInfo> for RecInfo {
+impl From<RecordingInfo> for ClientRecordingInfo {
     fn from(entry: RecordingInfo) -> Self {
-        RecInfo {
+        ClientRecordingInfo {
             id: entry.id,
             name: entry.name.clone(),
             created_at: entry.created_at,
+            length_seconds: entry.length_seconds,
+            note_count: entry.note_count,
         }
     }
 }
 
 /// Return list of recordings
-pub async fn get_recordings(app: Extension<App>) -> Json<Vec<RecInfo>> {
+pub async fn get_recordings(app: Extension<App>) -> Json<Vec<ClientRecordingInfo>> {
     let songs = app.query_recordings().await.map_or_else(
         |err| {
             error!("Failed to list songs: {}", err);
             vec![]
         },
-        |songs| songs.into_iter().map(RecInfo::from).collect(),
+        |songs| songs.into_iter().map(ClientRecordingInfo::from).collect(),
     );
 
     Json(songs)
@@ -91,7 +95,7 @@ pub async fn update_recording(
     app: Extension<App>,
     Path((recording_id,)): Path<(RecordingId,)>,
     Json(update): Json<RecUpdate>,
-) -> Result<Json<RecInfo>, AppError> {
+) -> Result<Json<ClientRecordingInfo>, AppError> {
     let rec = app.rename_recording(recording_id, update.name).await?;
     Ok(Json(rec.into()))
 }
@@ -143,10 +147,10 @@ pub async fn play_status(app: Extension<App>) -> Json<Option<RecordingId>> {
 #[serde(tag = "type")]
 pub enum UpdateEvent {
     RecordBegin,
-    RecordEnd { recording: RecInfo },
+    RecordEnd { recording: ClientRecordingInfo },
     RecordDelete { recording_id: RecordingId },
     RecordError { message: String },
-    RecordUpdate { recording: RecInfo },
+    RecordUpdate { recording: ClientRecordingInfo },
     PlayBegin { recording: RecordingId },
     PlayEnd,
 }
@@ -158,10 +162,10 @@ impl UpdateEvent {
             StateChange::ListenEnd => None,
             StateChange::RecordBegin => Some(UpdateEvent::RecordBegin),
             StateChange::RecordEnd { recording } => Some(UpdateEvent::RecordEnd {
-                recording: RecInfo::from(recording),
+                recording: ClientRecordingInfo::from(recording),
             }),
             StateChange::RecordUpdate { recording } => Some(UpdateEvent::RecordUpdate {
-                recording: RecInfo::from(recording),
+                recording: ClientRecordingInfo::from(recording),
             }),
             StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
             StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {

@@ -24,12 +24,16 @@ type Recording = {
     id: RecordingId,
     name: string,
     created_at: Date,
+    length_seconds: number,
+    note_count: number,
 };
 
 type WireRecording = {
     id: RecordingId,
     name: string,
     created_at: string,
+    length_seconds: number,
+    note_count: number,
 };
 
 type Action = {
@@ -287,6 +291,8 @@ function parseRecording(wire: WireRecording): Recording {
         id: wire.id,
         name: wire.name,
         created_at: new Date(wire.created_at),
+        length_seconds: wire.length_seconds,
+        note_count: wire.note_count,
     }
 }
 

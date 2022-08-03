@@ -3,7 +3,7 @@ import logo from './logo.svg';
 import './App.css';
 
 // Icons
-import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash, Pencil } from 'react-bootstrap-icons';
+import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash, Pencil, ClockHistory, MusicNote } from 'react-bootstrap-icons';
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState, Recording, RecordingId } from './App/State';
@@ -247,6 +247,14 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
         return (<Button variant="outline-primary" onClick={props.onPlay}><PlayFill /></Button>)
     }
   }
+
+  function prettySeconds(total_seconds: number): string {
+    let minutes = Math.floor(total_seconds / 60);
+    let seconds = total_seconds - minutes * 60;
+    
+    return `${minutes.toFixed(0)}:` + (seconds < 10 ? "0" : "") + `${seconds.toFixed(0)}`;
+  }
+
   return (
     <Stack direction='horizontal'>
       <Stack direction='vertical' className="mx-auto">
@@ -264,8 +272,10 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
               : <></>
           }
         </Stack>
-        <Stack direction='horizontal'>
-          <div className="text-truncate text-muted text-smaller">{props.recording.created_at.toLocaleTimeString()}</div>
+        <Stack className="text-truncate text-muted text-smaller" direction='horizontal'>
+          <div className="me-2">{props.recording.created_at.toLocaleTimeString()}</div>
+          <div className="me-1"><ClockHistory/> {prettySeconds(props.recording.length_seconds)}</div>
+          <div className="me-1"><MusicNote/> {props.recording.note_count}</div>
         </Stack>
       </Stack>
       <Button onClick={props.onRequestDelete} variant="outline-danger" className="me-2"><Trash /></Button>
