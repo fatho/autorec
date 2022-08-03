@@ -58,10 +58,7 @@ async fn main() -> Result<()> {
                     "/recordings/:recording_id",
                     delete(server::delete_recording),
                 )
-                .route(
-                    "/recordings/:recording_id",
-                    post(server::update_recording),
-                )
+                .route("/recordings/:recording_id", post(server::update_recording))
                 .route("/play", post(server::play))
                 .route("/stop", post(server::stop))
                 .route("/play-status", get(server::play_status))

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{Local, NaiveDateTime, TimeZone, Utc};
 use color_eyre::eyre::bail;
@@ -8,6 +8,8 @@ use sqlx::{
     Sqlite, SqlitePool, Transaction,
 };
 use tracing::{debug, info, warn};
+
+use crate::midi::{RECORDING_PPQ, RECORDING_TEMPO};
 
 #[derive(
     Debug,
@@ -34,23 +36,22 @@ where
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
-pub struct RecordingEntry {
+pub struct RecordingInfo {
     pub id: RecordingId,
     pub name: String,
-    pub filename: String,
     pub created_at: chrono::DateTime<Utc>,
+    pub length_seconds: f64,
+    pub note_count: u32,
 }
 
 #[derive(Debug)]
 pub struct RecordingStore {
-    directory: PathBuf,
     pool: SqlitePool,
 }
 
 impl RecordingStore {
     pub async fn open(directory: &Path) -> color_eyre::Result<Self> {
         let dbfile = directory.join("autorec.db");
-        let directory = directory.to_owned();
 
         let conn_opts = SqliteConnectOptions::new()
             .filename(dbfile)
@@ -60,21 +61,24 @@ impl RecordingStore {
 
         migrate(&pool, &directory).await?;
 
-        Ok(Self { pool, directory })
+        Ok(Self { pool })
     }
 
-    pub async fn get_recordings(&self) -> color_eyre::Result<Vec<RecordingEntry>> {
-        let recordings = sqlx::query_as::<_, RecordingEntry>(
-            "SELECT id, name, filename, created_at FROM recordings ORDER BY created_at DESC",
+    pub async fn get_recording_infos(&self) -> color_eyre::Result<Vec<RecordingInfo>> {
+        let recordings = sqlx::query_as::<_, RecordingInfo>(
+            "SELECT id, name, created_at, length_seconds, note_count FROM recordings ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
         Ok(recordings)
     }
 
-    pub async fn get_recording_by_id(&self, id: RecordingId) -> color_eyre::Result<RecordingEntry> {
-        let recording = sqlx::query_as::<_, RecordingEntry>(
-            "SELECT id, name, filename, created_at FROM recordings WHERE id = ?",
+    pub async fn get_recording_info_by_id(
+        &self,
+        id: RecordingId,
+    ) -> color_eyre::Result<RecordingInfo> {
+        let recording = sqlx::query_as::<_, RecordingInfo>(
+            "SELECT id, name, created_at, length_seconds, note_count FROM recordings WHERE id = ?",
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -93,7 +97,11 @@ impl RecordingStore {
         Ok(())
     }
 
-    pub async fn rename_recording_by_id(&self, id: RecordingId, new_name: String) -> color_eyre::Result<()> {
+    pub async fn rename_recording_by_id(
+        &self,
+        id: RecordingId,
+        new_name: String,
+    ) -> color_eyre::Result<()> {
         let recording = sqlx::query("UPDATE recordings SET name = ? WHERE id = ?")
             .bind(new_name)
             .bind(id)
@@ -105,22 +113,42 @@ impl RecordingStore {
         Ok(())
     }
 
+    pub async fn insert_recording(
+        &self,
+        midi: midly::Smf<'static>,
+    ) -> color_eyre::Result<RecordingInfo> {
+        let mut midi_data = vec![];
+        midi.write_std(&mut midi_data)
+            .expect("writing to vec doesn't fail");
+        let compressed_midi = compress_midi(midi_data);
 
-    pub async fn insert_recording(&self, filename: &Path, midi_data: Vec<u8>) -> color_eyre::Result<RecordingEntry> {
-        let path = self.directory.join(filename);
-        std::fs::write(path, midi_data)?;
+        let (length, note_count) = midi
+            .tracks
+            .first()
+            .map_or((std::time::Duration::default(), 0), compute_midi_stats);
 
-        let filename_utf8 = filename
-            .to_str()
-            .ok_or(color_eyre::eyre::eyre!("Path must be a valid string"))?;
-        let rec = sqlx::query_as::<_, RecordingEntry>(
-            "INSERT INTO recordings (filename, created_at) VALUES (?, ?) RETURNING id, name, filename, created_at",
+        let rec = sqlx::query_as::<_, RecordingInfo>(
+            "INSERT INTO recordings (created_at, length_seconds, note_count, midi)
+                VALUES (?, ?, ?, ?)
+                RETURNING id, name, created_at, length_seconds, note_count",
         )
-        .bind(filename_utf8)
         .bind(Utc::now())
+        .bind(length.as_secs_f64())
+        .bind(u32::try_from(note_count).unwrap_or(u32::MAX))
+        .bind(compressed_midi)
         .fetch_one(&self.pool)
         .await?;
         Ok(rec)
+    }
+
+    pub async fn get_recording_midi(&self, id: RecordingId) -> color_eyre::Result<Vec<u8>> {
+        let (compressed_midi,) =
+            sqlx::query_as::<_, (Vec<u8>,)>("SELECT midi FROM recordings WHERE id = ?")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?;
+        let midi = decompress_midi(compressed_midi);
+        Ok(midi)
     }
 }
 
@@ -152,8 +180,9 @@ async fn migrate(pool: &SqlitePool, directory: &Path) -> color_eyre::Result<()> 
 
         // Insert new migrations here
         match version {
-            None => {
-                migrate_000_init(&mut transaction, directory).await?;
+            None => migrate_000_init(&mut transaction, directory).await?,
+            Some(0) => {
+                migrate_001_inline_midi_storage_and_meta(&mut transaction, directory).await?
             }
             Some(_) => {
                 debug!("No more migrations");
@@ -216,10 +245,7 @@ async fn migrate_000_init(
                         |local| local.into(),
                     );
 
-                debug!(
-                    "Found {} with timestamp {}",
-                    filename, created_at
-                );
+                debug!("Found {} with timestamp {}", filename, created_at);
 
                 recordings.push((created_at, filename.to_owned()));
             }
@@ -238,4 +264,131 @@ async fn migrate_000_init(
     }
 
     Ok(())
+}
+
+/// Switch to storing the MIDI files inline with the SQLite database. They are quite small and not
+/// dealing with files on disk hopefully simplifies things.
+///
+/// Additionally, we will store the length of the recordings as well.
+async fn migrate_001_inline_midi_storage_and_meta(
+    transaction: &mut Transaction<'_, Sqlite>,
+    directory: &Path,
+) -> color_eyre::Result<()> {
+    debug!("Querying current recordings");
+
+    let recordings = sqlx::query_as::<_, (RecordingId, String)>(
+        "SELECT id, filename FROM recordings ORDER BY id",
+    )
+    .fetch_all(&mut *transaction)
+    .await?;
+
+    debug!("Adding new columns");
+
+    sqlx::query("ALTER TABLE recordings ADD COLUMN midi BLOB NOT NULL DEFAULT x''")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("ALTER TABLE recordings ADD COLUMN length_seconds REAL NOT NULL DEFAULT 0")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("ALTER TABLE recordings ADD COLUMN note_count INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *transaction)
+        .await?;
+
+    debug!("Processing recordings");
+
+    for (id, filename) in recordings {
+        let path = directory.join(&filename);
+
+        debug!("Loading {}", path.display());
+
+        let midi_data = std::fs::read(path)?;
+        let mut midi = midly::Smf::parse(&midi_data)?;
+
+        // Fixup tempo (MIDI files should explicitly set it - I previously relied on the aplaymidi
+        // default of 120)
+        for track in midi.tracks.iter_mut() {
+            let tempo_msg = midly::TrackEvent {
+                delta: 0.into(),
+                kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(RECORDING_TEMPO.into())),
+            };
+            track.insert(0, tempo_msg);
+        }
+        // Shadow old data with corrected version
+        let mut midi_data = vec![];
+        midi.write_std(&mut midi_data)
+            .expect("writing to vec doesn't fail");
+
+        // Compress using default LZ4 with size prefix
+        //let compressed_midi = lz4::block::compress(&midi_data, None, true)?;
+        let compressed_midi = compress_midi(midi_data);
+
+        if let Some(track) = midi.tracks.first() {
+            // Our MIDI files should have just a single track
+            let (length, note_count) = compute_midi_stats(&track);
+
+            debug!("Updating entry for {id:?}");
+            let result = sqlx::query(
+                r"
+                UPDATE recordings
+                    SET
+                        midi = ?,
+                        length_seconds = ?,
+                        note_count = ?
+                    WHERE
+                        id = ?
+            ",
+            )
+            .bind(&compressed_midi)
+            .bind(length.as_secs_f64())
+            .bind(u32::try_from(note_count).unwrap_or(u32::MAX))
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
+            if result.rows_affected() != 1 {
+                bail!(
+                    "Update to {id:?} did not affect exactly one row, {}",
+                    result.rows_affected()
+                );
+            }
+        } else {
+            bail!("Recording {id:?} at {filename} does not have a MIDI track",);
+        }
+    }
+
+    info!("Forgetting filename");
+
+    sqlx::query("ALTER TABLE recordings DROP COLUMN filename")
+        .execute(&mut *transaction)
+        .await?;
+
+    Ok(())
+}
+
+fn compute_midi_stats(track: &midly::Track) -> (std::time::Duration, usize) {
+    let length_ticks = track.iter().map(|event| event.delta.as_int()).sum::<u32>();
+    let length = std::time::Duration::from_micros(
+        (length_ticks as u64) * 1000000 * 60 / (RECORDING_PPQ as u64 * RECORDING_PPQ as u64),
+    );
+    let note_count = track
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.kind,
+                midly::TrackEventKind::Midi {
+                    channel: _,
+                    message: midly::MidiMessage::NoteOn { .. }
+                }
+            )
+        })
+        .count();
+
+    (length, note_count)
+}
+
+fn compress_midi<T: AsRef<[u8]>>(midi: T) -> Vec<u8> {
+    zstd::encode_all(midi.as_ref(), 5).expect("compressing in memory should not fail")
+}
+
+fn decompress_midi<T: AsRef<[u8]>>(midi: T) -> Vec<u8> {
+    zstd::decode_all(midi.as_ref()).expect("decompressing in memory should not fail")
 }

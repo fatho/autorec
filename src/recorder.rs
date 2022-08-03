@@ -7,7 +7,10 @@ use crate::{
     midi::{self, RecordEvent},
 };
 
-pub async fn run_recorder(app: Arc<Shared>, mut recorder: midi::Recorder) -> color_eyre::Result<()> {
+pub async fn run_recorder(
+    app: Arc<Shared>,
+    mut recorder: midi::Recorder,
+) -> color_eyre::Result<()> {
     loop {
         info!("Waiting for song to start");
         let event = recorder.next().await?;

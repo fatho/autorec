@@ -92,12 +92,28 @@ impl Manager {
 pub type DeviceListener = alsa_backend::DeviceListener;
 pub type Recorder = alsa_backend::MidiRecorder;
 
-pub fn encode_midi_file(events: Vec<RecordEvent>) -> Vec<u8> {
+/// pulses per quarter note of our recordings
+pub const RECORDING_PPQ: u16 = 96;
+
+/// Beats per minute of our recordings
+///
+/// NOTE: This is just used for assigning meaning to the MIDI ticks - we don't actually know the
+/// real BPM of the song that is played.
+pub const RECORDING_BPM: u16 = 120;
+
+/// Microseconds per quarter note
+pub const RECORDING_TEMPO: u32 = 1_000_000 * 60 / (RECORDING_BPM as u32);
+
+pub fn encode_midi(events: Vec<RecordEvent>) -> midly::Smf<'static> {
     let mut smf = midly::Smf::new(midly::Header::new(
         midly::Format::SingleTrack,
-        midly::Timing::Metrical(midly::num::u15::new(96)),
+        midly::Timing::Metrical(midly::num::u15::new(RECORDING_PPQ)),
     ));
-    let mut track = Vec::new();
+
+    let mut track = vec![midly::TrackEvent {
+        delta: 0.into(),
+        kind: midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(RECORDING_TEMPO.into())),
+    }];
     let mut last_time = events.first().map_or(0, |rev| rev.timestamp);
 
     for event in events.iter() {
@@ -145,7 +161,5 @@ pub fn encode_midi_file(events: Vec<RecordEvent>) -> Vec<u8> {
     });
     smf.tracks.push(track);
 
-    let mut midi_data = vec![];
-    smf.write_std(&mut midi_data).expect("writing to vec doesn't fail");
-    midi_data
+    smf
 }

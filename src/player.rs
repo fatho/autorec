@@ -7,7 +7,11 @@
 use std::{pin::Pin, process::Stdio, sync::Arc};
 
 use lazy_static::lazy_static;
-use tokio::{select, sync::{oneshot, broadcast, Mutex}, task::JoinHandle};
+use tokio::{
+    select,
+    sync::{broadcast, oneshot, Mutex},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
@@ -21,6 +25,7 @@ lazy_static!(
     static ref GM_RESET_MESSAGE_MID: Vec<u8> = {
         let mut smf = midly::Smf::new(midly::Header::new(
             midly::Format::SingleTrack,
+            // Timing doesn't matter since we just send a single message
             midly::Timing::Metrical(midly::num::u15::new(96)),
         ));
         let mut track = Vec::new();
@@ -151,7 +156,12 @@ impl<T: Clone + Send + 'static> MidiPlayQueue<T> {
         self.tx.subscribe()
     }
 
-    pub async fn play(&mut self, token: T, output: String, source: Pin<Box<dyn tokio::io::AsyncRead + Send>>) -> std::io::Result<()> {
+    pub async fn play(
+        &mut self,
+        token: T,
+        output: String,
+        source: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
+    ) -> std::io::Result<()> {
         if let Some((player, waiter)) = self.player.take() {
             player.stop();
             let _ = waiter.await;

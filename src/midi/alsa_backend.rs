@@ -14,6 +14,8 @@ use alsa::{
 use tokio::io::unix::AsyncFd;
 use tracing::{debug, trace, warn};
 
+use crate::midi::{RECORDING_PPQ, RECORDING_BPM};
+
 use super::{DeviceEvent, MidiEvent, RecordEvent};
 
 /// There should only be one instance of this.
@@ -261,10 +263,8 @@ impl MidiRecorder {
 
         // These should be the defaults, but better to spell it out
         let tempo = QueueTempo::empty()?;
-        let bpm = 120;
-        let ppq = 96;
-        tempo.set_ppq(ppq); // Pulses per Quarter note
-        tempo.set_tempo(1000000 * 60 / bpm); // Microseconds per beat
+        tempo.set_ppq(RECORDING_PPQ as i32); // Pulses per Quarter note
+        tempo.set_tempo(1000000 * 60 / (RECORDING_BPM as u32)); // Microseconds per beat
         client.seq.set_queue_tempo(recv_queue, &tempo)?;
 
         debug!(client = client.id, "configured queue {}", recv_queue);
@@ -316,8 +316,8 @@ impl MidiRecorder {
 
         Ok(Self {
             poll: Some(poll),
-            bpm,
-            ppq,
+            bpm: RECORDING_BPM.into(),
+            ppq: RECORDING_PPQ.into(),
         })
     }
 

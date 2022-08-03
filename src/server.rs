@@ -1,4 +1,4 @@
-use std::{convert::Infallible};
+use std::convert::Infallible;
 
 use axum::{
     extract::Path,
@@ -17,7 +17,7 @@ use tracing::error;
 
 use crate::{
     app::{App, StateChange},
-    store::{RecordingEntry, RecordingId},
+    store::{RecordingId, RecordingInfo},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -49,8 +49,8 @@ pub struct RecInfo {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<RecordingEntry> for RecInfo {
-    fn from(entry: RecordingEntry) -> Self {
+impl From<RecordingInfo> for RecInfo {
+    fn from(entry: RecordingInfo) -> Self {
         RecInfo {
             id: entry.id,
             name: entry.name.clone(),
@@ -108,7 +108,9 @@ pub struct AppError {
 
 impl From<color_eyre::eyre::ErrReport> for AppError {
     fn from(err: color_eyre::eyre::ErrReport) -> Self {
-        AppError { message: err.to_string() }
+        AppError {
+            message: err.to_string(),
+        }
     }
 }
 

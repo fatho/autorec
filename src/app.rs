@@ -1,20 +1,15 @@
-use std::{
-    path::Path,
-    sync::{Arc},
-};
+use std::{sync::Arc};
 
 use crate::{
     config::AppConfig,
-    midi::{self, encode_midi_file, Device, DeviceInfo, RecordEvent},
+    midi::{self, encode_midi, Device, DeviceInfo, RecordEvent},
     player::{self, MidiPlayQueue},
     recorder,
-    store::{RecordingEntry, RecordingId, RecordingStore},
+    store::{RecordingId, RecordingInfo, RecordingStore},
 };
 
 use color_eyre::eyre::bail;
-use tokio::{
-    sync::{broadcast, Mutex},
-};
+use tokio::sync::{broadcast, Mutex};
 use tracing::{error, info};
 
 #[derive(Debug)]
@@ -30,6 +25,7 @@ pub struct State {
     player: player::MidiPlayQueue<RecordingId>,
     midi: midi::Manager,
     store: RecordingStore,
+    #[allow(unused)]
     shutdown: broadcast::Sender<()>,
 }
 
@@ -83,28 +79,34 @@ impl App {
         self.shared.change_tx.subscribe()
     }
 
-    pub async fn query_recordings(&self) -> color_eyre::Result<Vec<RecordingEntry>> {
+    pub async fn query_recordings(&self) -> color_eyre::Result<Vec<RecordingInfo>> {
         let state = self.shared.state.lock().await;
-        state.store.get_recordings().await
+        state.store.get_recording_infos().await
     }
 
     pub async fn delete_recording(&self, recording: RecordingId) -> color_eyre::Result<()> {
         let state = self.shared.state.lock().await;
-        let rec = state.store.get_recording_by_id(recording).await?;
         state.store.delete_recording_by_id(recording).await?;
-        let rec_file = self.shared.config.data_directory.join(&rec.filename);
-        std::fs::remove_file(rec_file)?;
         self.shared.notify(StateChange::RecordDelete {
             recording_id: recording,
         });
         Ok(())
     }
 
-    pub async fn rename_recording(&self, recording: RecordingId, new_name: String) -> color_eyre::Result<RecordingEntry> {
+    pub async fn rename_recording(
+        &self,
+        recording: RecordingId,
+        new_name: String,
+    ) -> color_eyre::Result<RecordingInfo> {
         let state = self.shared.state.lock().await;
-        state.store.rename_recording_by_id(recording, new_name).await?;
-        let rec = state.store.get_recording_by_id(recording).await?;
-        self.shared.notify(StateChange::RecordUpdate { recording: rec.clone() });
+        state
+            .store
+            .rename_recording_by_id(recording, new_name)
+            .await?;
+        let rec = state.store.get_recording_info_by_id(recording).await?;
+        self.shared.notify(StateChange::RecordUpdate {
+            recording: rec.clone(),
+        });
         Ok(rec)
     }
 
@@ -112,16 +114,11 @@ impl App {
         let mut state = self.shared.state.lock().await;
         if let Some(output) = state.listening_device.clone() {
             info!("Playing {}", recording.0);
-
-            let entry = state.store.get_recording_by_id(recording).await?;
-
-            let filepath = self.shared.config.data_directory.join(&entry.filename);
-
-            let reader = tokio::fs::File::open(filepath).await?;
+            let data = state.store.get_recording_midi(recording).await?;
 
             state
                 .player
-                .play(recording, output.id(), Box::pin(reader))
+                .play(recording, output.id(), Box::pin(std::io::Cursor::new(data)))
                 .await?;
             Ok(())
         } else {
@@ -155,10 +152,8 @@ async fn player_event_loop(
             Ok(evt) => match evt {
                 player::QueueEvent::PlaybackStart(recording) => {
                     shared.notify(StateChange::PlayBegin { recording })
-                },
-                player::QueueEvent::PlaybackStop(_) => {
-                    shared.notify(StateChange::PlayEnd)
-                },
+                }
+                player::QueueEvent::PlaybackStop(_) => shared.notify(StateChange::PlayEnd),
             },
             Err(err) => match err {
                 broadcast::error::RecvError::Closed => break,
@@ -228,7 +223,7 @@ impl Shared {
         }
     }
 
-    async fn handle_device_removed(self: &Arc<Self>, device: Device) {}
+    async fn handle_device_removed(self: &Arc<Self>, _device: Device) {}
 
     pub(crate) async fn start_recording(&self) {
         self.notify(StateChange::RecordBegin);
@@ -236,19 +231,14 @@ impl Shared {
 
     pub(crate) async fn finish_recording(&self, events: Vec<RecordEvent>) {
         let state = self.state.lock().await;
-        let name = chrono::Local::now().format("%Y%m%d-%H%M%S.mid").to_string();
-        let data = encode_midi_file(events);
-        match state
-            .store
-            .insert_recording(Path::new(name.as_str()), data)
-            .await
-        {
+        let data = encode_midi(events);
+        match state.store.insert_recording(data).await {
             Ok(recording) => {
-                info!("Recorded song '{}' with id {}", name, recording.id.0);
+                info!("Recording saved with id {}", recording.id.0);
                 self.notify(StateChange::RecordEnd { recording });
             }
             Err(err) => {
-                error!("Failed to register song '{}': {}", name, err);
+                error!("Failed to store recording: {}", err);
                 self.notify(StateChange::RecordError {
                     message: err.to_string(),
                 });
@@ -302,13 +292,13 @@ pub enum StateChange {
     /// App starts recording
     RecordBegin,
     /// App stops recording (due to MIDI inactivity)
-    RecordEnd { recording: RecordingEntry },
+    RecordEnd { recording: RecordingInfo },
     /// Failed to record song
     RecordError { message: String },
     /// A recording was deleted
     RecordDelete { recording_id: RecordingId },
     /// A recording was updated
-    RecordUpdate { recording: RecordingEntry },
+    RecordUpdate { recording: RecordingInfo },
     /// App starts playing back
     PlayBegin { recording: RecordingId },
     /// App stops playing back
