@@ -257,28 +257,24 @@ const RecordingItem = React.memo((props: RecordingItemProps) => {
 
   return (
     <Stack direction='horizontal'>
-      <Stack direction='vertical' className="mx-auto">
-        <Stack direction='horizontal'>
-          <div aria-label="Click to Rename" onClick={props.onRequestRename}>
+      <div aria-label="Click to Rename" onClick={props.onRequestRename} className="text-truncate me-auto">
           {
             props.recording.name
-              ? (<span className="text-truncate">{props.recording.name}</span>)
-              : (<span className="text-truncate text-italic">Unnamed</span>)
+              ? (<span>{props.recording.name}</span>)
+              : (<span className="text-italic">Unnamed</span>)
           }
-          </div>
           {
             props.playingState === PlayingState.Playing
               ? <VolumeUp className="ms-2" size="1.5em" color="gray" />
               : <></>
           }
-        </Stack>
-        <Stack className="text-truncate text-muted text-smaller" direction='horizontal'>
-          <div className="me-2">{props.recording.created_at.toLocaleTimeString()}</div>
-          <div className="me-1"><ClockHistory/> {prettySeconds(props.recording.length_seconds)}</div>
-          <div className="me-1"><MusicNote/> {props.recording.note_count}</div>
-        </Stack>
-      </Stack>
-      <Button onClick={props.onRequestDelete} variant="outline-danger" className="me-2"><Trash /></Button>
+          <footer className="text-muted text-smaller">
+            <span className="me-2">{props.recording.created_at.toLocaleTimeString()}</span>
+            <span className="me-1"><ClockHistory/> {prettySeconds(props.recording.length_seconds)}</span>
+            <span className="me-1"><MusicNote/> {props.recording.note_count}</span>
+          </footer>
+      </div>
+      <Button onClick={props.onRequestDelete} variant="outline-danger" className="ms-2 me-2"><Trash /></Button>
       {playControlButton()}
     </Stack>
   );
