@@ -127,7 +127,7 @@ const actions = {
     updateRecording: async (dispatch: ActionDispatch, recording: Recording) => {
         try {
             const response = await fetch(`/recordings/${recording.id}`, {
-              method: "POST",
+              method: "PUT",
               headers: {
                 "Content-Type": "application/json",
               },

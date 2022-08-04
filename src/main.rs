@@ -1,7 +1,7 @@
 use axum::{
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, get_service, post},
+    routing::{delete, get, get_service, post, put},
     Extension, Router,
 };
 use clap::Parser;
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
                     "/recordings/:recording_id",
                     delete(server::delete_recording),
                 )
-                .route("/recordings/:recording_id", post(server::update_recording))
+                .route("/recordings/:recording_id", put(server::update_recording))
                 .route("/play", post(server::play))
                 .route("/stop", post(server::stop))
                 .route("/play-status", get(server::play_status))
