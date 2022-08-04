@@ -174,8 +174,21 @@ async fn migrate(pool: &SqlitePool, directory: &Path) -> color_eyre::Result<()> 
 
     info!("Database version: {:?}", version);
 
+    const LATEST_VERSION: i32 = 2;
+
     loop {
-        let new_version = version.map_or(0, |v| v + 1);
+        if let Some(version) = version {
+            if version < LATEST_VERSION {
+                // create a backup
+                let orig = directory.join("autorec.db");
+                let backup = directory.join(format!("autorec.db.v{}", version));
+                if backup.exists() {
+                    bail!("Backup file '{}' already exists", backup.display());
+                }
+                std::fs::copy(orig, backup)?;
+            }
+        }
+
         let mut transaction = pool.begin().await?;
 
         // Insert new migrations here
@@ -185,12 +198,16 @@ async fn migrate(pool: &SqlitePool, directory: &Path) -> color_eyre::Result<()> 
                 migrate_001_inline_midi_storage_and_meta(&mut transaction, directory).await?
             }
             Some(1) => migrate_002_fix_length_seconds(&mut transaction).await?,
-            Some(_) => {
+            Some(LATEST_VERSION) => {
                 debug!("No more migrations");
                 break;
             }
+            Some(_) => {
+                bail!("Version too new!")
+            }
         };
 
+        let new_version = version.map_or(0, |v| v + 1);
         info!("Migrated to version {}", new_version);
 
         let timestamp = chrono::Utc::now();
