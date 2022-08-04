@@ -1,4 +1,4 @@
-use std::{sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     config::AppConfig,
@@ -108,6 +108,78 @@ impl App {
             recording: rec.clone(),
         });
         Ok(rec)
+    }
+
+    pub async fn classify_recording(
+        &self,
+        recording: RecordingId,
+    ) -> color_eyre::Result<Vec<String>> {
+        let state = self.shared.state.lock().await;
+
+        // TODO: optimize
+
+        fn update_histogram(midi_data: &[u8], hist: &mut [u32]) -> color_eyre::Result<()> {
+            let midi = midly::Smf::parse(midi_data)?;
+            if let Some(track) = midi.tracks.first() {
+                for event in track {
+                    if let midly::TrackEventKind::Midi {
+                        message: midly::MidiMessage::NoteOn { key, .. },
+                        ..
+                    } = event.kind
+                    {
+                        hist[key.as_int() as usize] += 1;
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        // Build histogram of queried recording
+        let mut query_hist = vec![0; 128];
+        let midi_data = state.store.get_recording_midi(recording).await?;
+        update_histogram(&midi_data, &mut query_hist)?;
+
+        // Build histogram per name
+        let recs = state.store.get_recording_infos().await?;
+        let mut groups: HashMap<&str, Vec<u32>> = HashMap::new();
+
+        for rec in recs.iter() {
+            if !rec.name.is_empty() && rec.id != recording {
+                let group = groups
+                    .entry(rec.name.as_str())
+                    .or_insert_with(|| vec![0; 128]);
+
+                let midi_data = state.store.get_recording_midi(rec.id).await?;
+                update_histogram(&midi_data, group)?;
+            }
+        }
+
+        // Compute cosine similarity for each name
+        fn cosine_sim(a: &[u32], b: &[u32]) -> f64 {
+            let mag_a = a.iter().map(|x| (x * x) as f64).sum::<f64>().sqrt();
+            let mag_b = b.iter().map(|x| (x * x) as f64).sum::<f64>().sqrt();
+
+            let dot = a
+                .iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x * y) as f64)
+                .sum::<f64>();
+
+            dot / (mag_a * mag_b)
+        }
+
+        let mut outcome = groups
+            .iter()
+            .filter_map(|(name, hist)| {
+                Some((
+                    *name,
+                    ordered_float::NotNan::new(cosine_sim(&query_hist, hist)).ok()?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        outcome.sort_by_key(|x| -x.1);
+
+        Ok(outcome.into_iter().map(|x| x.0.to_owned()).collect())
     }
 
     pub async fn play_recording(&self, recording: RecordingId) -> color_eyre::Result<()> {

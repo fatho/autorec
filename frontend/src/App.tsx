@@ -7,7 +7,7 @@ import { ArrowClockwise, StopFill, PlayFill, VolumeUp, Trash, Pencil, ClockHisto
 
 import { AppContextProvider, useAppContext } from './App/AppContext';
 import { PlayingState, Recording, RecordingId } from './App/State';
-import { Button, Alert, Spinner, ButtonToolbar, ButtonGroup, Navbar, Container, ListGroup, Stack, Modal, Nav, Offcanvas } from 'react-bootstrap';
+import { Button, Alert, Spinner, ButtonToolbar, ButtonGroup, Navbar, Container, ListGroup, Stack, Modal, Nav, Offcanvas, ListGroupItem } from 'react-bootstrap';
 
 function App() {
   return (
@@ -75,6 +75,7 @@ function RecordingsList() {
   const [showConfirmRename, setShowConfirmRename] = useState(false);
   const [itemToRename, setItemToRename] = useState(null as number | null);
   const [newName, setNewName] = useState("");
+  const [nameSuggestions, setNameSuggestions] = useState(null as string[] | null);
   const renameInput = useRef(null as HTMLInputElement | null);
 
   const handleCloseDelete = () => setShowConfirmDelete(false);
@@ -87,12 +88,12 @@ function RecordingsList() {
     setShowConfirmDelete(false);
   }
 
-  function handleRename() {
+  function handleRename(overrideNewName?: string) {
     const initial = state.recordings.find(rec => rec.id === itemToRename);
     if(itemToRename && initial) {
       actions.updateRecording(dispatch, {
         ...initial,
-        name: newName
+        name: overrideNewName || newName
       });
     }
     setShowConfirmRename(false);
@@ -114,6 +115,12 @@ function RecordingsList() {
     if(initial) {
       setNewName(initial.name);
       setItemToRename(item);
+      setNameSuggestions(null);
+      fetch(`/recordings/${item}/classify`, {
+        method: 'POST'
+      }).then(res => res.json()).then(data =>
+        setNameSuggestions(data)
+      );
       setShowConfirmRename(true);      
     }
   }
@@ -171,19 +178,39 @@ function RecordingsList() {
         <Modal.Body>
           <input
             ref={renameInput}
-            placeholder="Enter name here"
+            placeholder="Enter name here or select below"
             type="text"
             className="form-control"
             onKeyUp={handleRenameKeyUp}
             value={newName}
             onChange={e => setNewName(e.target.value)}
             />
+            {
+              nameSuggestions !== null
+                ? (
+                  <>
+                    <hr/>
+                    <ListGroup>
+                        {
+                          nameSuggestions.slice(0, 3).map(name => (
+                            <ListGroupItem action key={name} variant="primary" onClick={e => {
+                                handleRename(name);
+                              }}>
+                                {name}
+                            </ListGroupItem>
+                          ))
+                        }
+                    </ListGroup>
+                  </>
+                )
+                : <Spinner animation='border' />
+            }
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={handleCloseRename}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleRename}>
+          <Button variant="primary" onClick={e => handleRename()}>
             Rename
           </Button>
         </Modal.Footer>

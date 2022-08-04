@@ -100,6 +100,15 @@ pub async fn update_recording(
     Ok(Json(rec.into()))
 }
 
+/// Classify the name of a recording based on the other recordings
+pub async fn classify_recording(
+    app: Extension<App>,
+    Path((recording_id,)): Path<(RecordingId,)>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let guesses = app.classify_recording(recording_id).await?;
+    Ok(Json(guesses))
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct PlayRequest {
     id: RecordingId,
