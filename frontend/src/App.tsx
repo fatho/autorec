@@ -75,7 +75,7 @@ function RecordingsList() {
   const [showConfirmRename, setShowConfirmRename] = useState(false);
   const [itemToRename, setItemToRename] = useState(null as number | null);
   const [newName, setNewName] = useState("");
-  const [nameSuggestions, setNameSuggestions] = useState(null as string[] | null);
+  const [nameSuggestions, setNameSuggestions] = useState(null as {name: string, similarity: number}[] | null);
   const renameInput = useRef(null as HTMLInputElement | null);
 
   const handleCloseDelete = () => setShowConfirmDelete(false);
@@ -118,8 +118,8 @@ function RecordingsList() {
       setNameSuggestions(null);
       fetch(`/recordings/${item}/classify`, {
         method: 'POST'
-      }).then(res => res.json()).then(data =>
-        setNameSuggestions(data)
+      }).then(res => res.json()).then((data: {name: string, similarity: number}[]) =>
+        setNameSuggestions(data.filter(suggestion => suggestion.similarity > 0.9))
       );
       setShowConfirmRename(true);      
     }
@@ -190,17 +190,24 @@ function RecordingsList() {
                 ? (
                   <>
                     <hr/>
-                    <ListGroup>
-                        {
-                          nameSuggestions.slice(0, 3).map(name => (
-                            <ListGroupItem action key={name} variant="primary" onClick={e => {
-                                handleRename(name);
-                              }}>
-                                {name}
-                            </ListGroupItem>
-                          ))
-                        }
-                    </ListGroup>
+                    {
+                      nameSuggestions.length > 0 
+                        ? (
+
+                            <ListGroup>
+                              {
+                                nameSuggestions.slice(0, 3).map(suggestion => (
+                                  <ListGroupItem action key={suggestion.name} variant="primary" onClick={e => {
+                                      handleRename(suggestion.name);
+                                    }}>
+                                    {suggestion.name}
+                                  </ListGroupItem>
+                                ))
+                              }
+                            </ListGroup>
+                          )
+                        : <>No similar songs</>
+                    }
                   </>
                 )
                 : <Spinner animation='border' />

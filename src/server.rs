@@ -90,6 +90,12 @@ pub struct RecUpdate {
     pub name: String,
 }
 
+#[derive(Serialize)]
+pub struct NameClassification {
+    pub name: String,
+    pub similarity: f64,
+}
+
 /// Update a recording
 pub async fn update_recording(
     app: Extension<App>,
@@ -104,9 +110,14 @@ pub async fn update_recording(
 pub async fn classify_recording(
     app: Extension<App>,
     Path((recording_id,)): Path<(RecordingId,)>,
-) -> Result<Json<Vec<String>>, AppError> {
+) -> Result<Json<Vec<NameClassification>>, AppError> {
     let guesses = app.classify_recording(recording_id).await?;
-    Ok(Json(guesses))
+    Ok(Json(
+        guesses
+            .into_iter()
+            .map(|(name, similarity)| NameClassification { name, similarity })
+            .collect(),
+    ))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -177,9 +188,7 @@ impl UpdateEvent {
                 recording: ClientRecordingInfo::from(recording),
             }),
             StateChange::RecordError { message } => Some(UpdateEvent::RecordError { message }),
-            StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin {
-                recording,
-            }),
+            StateChange::PlayBegin { recording } => Some(UpdateEvent::PlayBegin { recording }),
             StateChange::PlayEnd => Some(UpdateEvent::PlayEnd),
             StateChange::RecordDelete { recording_id } => {
                 Some(UpdateEvent::RecordDelete { recording_id })

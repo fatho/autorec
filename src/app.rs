@@ -113,7 +113,7 @@ impl App {
     pub async fn classify_recording(
         &self,
         recording: RecordingId,
-    ) -> color_eyre::Result<Vec<String>> {
+    ) -> color_eyre::Result<Vec<(String, f64)>> {
         let state = self.shared.state.lock().await;
 
         // TODO: optimize
@@ -179,7 +179,7 @@ impl App {
             .collect::<Vec<_>>();
         outcome.sort_by_key(|x| -x.1);
 
-        Ok(outcome.into_iter().map(|x| x.0.to_owned()).collect())
+        Ok(outcome.into_iter().map(|x| (x.0.to_owned(), x.1.into_inner())).collect())
     }
 
     pub async fn play_recording(&self, recording: RecordingId) -> color_eyre::Result<()> {
