@@ -45,11 +45,18 @@ function App() {
               </Offcanvas.Header>
               <Offcanvas.Body>
                 <Nav>
+                  <Nav.Item className="fw-bold">
+                    Recordings
+                  </Nav.Item>                  
                   <Nav.Item>
-                    <Nav.Link href="#bydate">Recordings by Date</Nav.Link>
+                    <Nav.Link>By date</Nav.Link>
                   </Nav.Item>
                   <Nav.Item>
-                    <Nav.Link href="#about">About</Nav.Link>
+                    <Nav.Link>By title</Nav.Link>
+                  </Nav.Item>
+                  <hr/>
+                  <Nav.Item>
+                    <Nav.Link>About</Nav.Link>
                   </Nav.Item>
                 </Nav>
               </Offcanvas.Body>
@@ -223,7 +230,7 @@ function RecordingsList() {
         </Modal.Footer>
       </Modal>
 
-      <Stack>
+      <Stack className="mb-3">
         {state.isRecording
           ? (
             <ListGroup>
